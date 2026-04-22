@@ -27,7 +27,6 @@ pub struct App {
     drag_start: Option<Pos2>,
     config: Config,
     toolbars_visible: bool,
-    last_saved_path: Option<String>,
     initialized: bool,
     // Deferred actions that need ctx
     pending_copy: bool,
@@ -78,7 +77,6 @@ impl App {
             drag_start: Option::None,
             config,
             toolbars_visible,
-            last_saved_path: None,
             initialized: false,
             pending_copy: false,
             pending_save: false,
@@ -119,6 +117,16 @@ impl App {
         let h = self.source_image.height() as f32 * self.zoom;
         let center = self.canvas_rect.center() + self.pan;
         Rect::from_center_size(center, egui::vec2(w, h))
+    }
+
+    fn clamp_to_image(&self, p: Pos2) -> Pos2 {
+        let w = self.source_image.width() as f32;
+        let h = self.source_image.height() as f32;
+        Pos2::new(p.x.clamp(0.0, w), p.y.clamp(0.0, h))
+    }
+
+    fn is_inside_image(&self, screen_pos: Pos2) -> bool {
+        self.image_rect().contains(screen_pos)
     }
 
     fn commit_annotation(&mut self, ann: Annotation) {
@@ -172,8 +180,16 @@ impl App {
             &self.annotations,
             self.config.general.corner_roundness,
         );
-        if let Err(e) = copy_to_clipboard(&rendered, self.config.general.copy_command.as_deref()) {
-            eprintln!("Copy to clipboard failed: {}", e);
+        match copy_to_clipboard(&rendered, self.config.general.copy_command.as_deref()) {
+            Ok(()) => {
+                let _ = notify_rust::Notification::new()
+                    .summary("slappyshot")
+                    .body("Copied to clipboard")
+                    .show();
+            }
+            Err(e) => {
+                eprintln!("Copy to clipboard failed: {}", e);
+            }
         }
         if self.config.general.save_after_copy {
             // We can't call save here (needs &mut self), just note it
@@ -197,7 +213,10 @@ impl App {
         );
         match rendered.save(&filename) {
             Ok(()) => {
-                self.last_saved_path = Some(filename);
+                let _ = notify_rust::Notification::new()
+                    .summary("slappyshot")
+                    .body(&format!("Saved: {}", filename))
+                    .show();
             }
             Err(e) => {
                 eprintln!("Failed to save file: {}", e);
@@ -852,9 +871,11 @@ impl App {
         // Primary button drag start
         if response.drag_started_by(egui::PointerButton::Primary) {
             if let Some(origin) = ctx.input(|i| i.pointer.press_origin()) {
-                let img_pos = self.screen_to_image(origin);
-                self.drag_start = Some(img_pos);
-                self.on_drag_begin(img_pos, modifiers);
+                if self.is_inside_image(origin) {
+                    let img_pos = self.clamp_to_image(self.screen_to_image(origin));
+                    self.drag_start = Some(img_pos);
+                    self.on_drag_begin(img_pos, modifiers);
+                }
             }
         }
 
@@ -863,7 +884,7 @@ impl App {
             if let (Some(start), Some(hover)) =
                 (self.drag_start, ctx.input(|i| i.pointer.hover_pos()))
             {
-                let current = self.screen_to_image(hover);
+                let current = self.clamp_to_image(self.screen_to_image(hover));
                 let delta_vec = current.to_vec2() - start.to_vec2();
                 let delta_pos = Pos2::new(delta_vec.x, delta_vec.y);
                 self.on_drag_update(start, delta_pos, modifiers);
@@ -876,7 +897,7 @@ impl App {
             if let Some(start) = self.drag_start.take() {
                 let hover = ctx
                     .input(|i| i.pointer.hover_pos())
-                    .map(|p| self.screen_to_image(p))
+                    .map(|p| self.clamp_to_image(self.screen_to_image(p)))
                     .unwrap_or(start);
                 let delta_vec = hover.to_vec2() - start.to_vec2();
                 let delta_pos = Pos2::new(delta_vec.x, delta_vec.y);
@@ -887,8 +908,10 @@ impl App {
         // Click (single press-release without drag)
         if response.clicked_by(egui::PointerButton::Primary) {
             if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                let img_pos = self.screen_to_image(pos);
-                self.on_click(img_pos, modifiers);
+                if self.is_inside_image(pos) {
+                    let img_pos = self.clamp_to_image(self.screen_to_image(pos));
+                    self.on_click(img_pos, modifiers);
+                }
             }
         }
 
@@ -1001,9 +1024,6 @@ impl eframe::App for App {
                         .clicked()
                     {
                         self.pending_save = true;
-                    }
-                    if let Some(ref path) = self.last_saved_path.clone() {
-                        ui.label(format!("Saved: {}", path));
                     }
                 });
                 self.top_toolbar_content_width = r.response.rect.width() - leading;
