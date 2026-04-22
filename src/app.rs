@@ -34,6 +34,7 @@ pub struct App {
     pending_save: bool,
     top_toolbar_content_width: f32,
     bottom_toolbar_content_width: f32,
+    toolbar_min_width_applied: bool,
 }
 
 impl App {
@@ -84,6 +85,7 @@ impl App {
 
             top_toolbar_content_width: 9999.0,
             bottom_toolbar_content_width: 9999.0,
+            toolbar_min_width_applied: false,
         }
     }
 
@@ -1066,6 +1068,20 @@ impl eframe::App for App {
                 });
                 self.bottom_toolbar_content_width = r.response.rect.width() - leading;
             });
+
+        // Enforce minimum window width to fit the toolbar
+        let min_toolbar_w = self.top_toolbar_content_width.max(self.bottom_toolbar_content_width);
+        if min_toolbar_w < 9999.0 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(min_toolbar_w, 300.0)));
+            if !self.toolbar_min_width_applied {
+                self.toolbar_min_width_applied = true;
+                let current_w = ctx.screen_rect().width();
+                if current_w < min_toolbar_w {
+                    let current_h = ctx.screen_rect().height();
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(min_toolbar_w, current_h)));
+                }
+            }
+        }
 
         // Central panel
         let frame = egui::Frame::none().fill(Color32::from_rgb(30, 30, 35));
