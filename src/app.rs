@@ -71,7 +71,7 @@ impl App {
             active_drawing: ActiveDrawing::None,
             active_tool: initial_tool,
             crop_state: CropState::default(),
-            marker_counter: 0,
+            marker_counter: 1,
             style,
             primary_highlighter,
             drag_start: Option::None,
@@ -164,7 +164,7 @@ impl App {
             })
             .max()
             .map(|n| n + 1)
-            .unwrap_or(0);
+            .unwrap_or(1);
     }
 
     fn switch_tool(&mut self, tool: ToolType) {
@@ -185,6 +185,7 @@ impl App {
                 let _ = notify_rust::Notification::new()
                     .summary("slappyshot")
                     .body("Copied to clipboard")
+                    .icon("satty")
                     .show();
             }
             Err(e) => {
@@ -216,6 +217,7 @@ impl App {
                 let _ = notify_rust::Notification::new()
                     .summary("slappyshot")
                     .body(&format!("Saved: {}", filename))
+                    .icon("satty")
                     .show();
             }
             Err(e) => {
@@ -1168,6 +1170,18 @@ impl eframe::App for App {
                         * self.zoom;
                 let color = self.style.color.to_egui();
 
+                // Consume Enter (without Shift) before TextEdit so it doesn't insert a newline.
+                // Shift+Enter is left unconsumed so TextEdit handles it as a newline.
+                let enter_pressed = ctx.input_mut(|i| {
+                    if i.key_pressed(egui::Key::Enter) && !i.modifiers.shift {
+                        i.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                let escape_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+
                 egui::Area::new(egui::Id::new("text_input"))
                     .fixed_pos(screen_pos)
                     .show(ctx, |ui| {
@@ -1189,9 +1203,8 @@ impl eframe::App for App {
                     *content = local_content.clone();
                 }
 
-                // Commit on Escape
-                let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-                if escape {
+                if enter_pressed {
+                    // Commit on Enter
                     if !local_content.is_empty() {
                         let ann = Annotation::Text {
                             pos,
@@ -1200,6 +1213,9 @@ impl eframe::App for App {
                         };
                         self.commit_annotation(ann);
                     }
+                    self.active_drawing = ActiveDrawing::None;
+                } else if escape_pressed {
+                    // Cancel on Escape
                     self.active_drawing = ActiveDrawing::None;
                 }
             }

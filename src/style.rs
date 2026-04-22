@@ -57,9 +57,9 @@ pub enum Size {
 impl Size {
     pub fn to_text_size(self, size_factor: f32) -> i32 {
         match self {
-            Size::Small => (36.0 * size_factor) as i32,
-            Size::Medium => (54.0 * size_factor) as i32,
-            Size::Large => (96.0 * size_factor) as i32,
+            Size::Small => (16.0 * size_factor) as i32,
+            Size::Medium => (24.0 * size_factor) as i32,
+            Size::Large => (40.0 * size_factor) as i32,
         }
     }
 
