@@ -1,80 +1,30 @@
 [package]
-name = "satty"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-description.workspace = true
-homepage.workspace = true
-repository.workspace = true
-license.workspace = true
-include = [
-  "src/**/*",
-  "Cargo.toml",
-  "Cargo.lock",
-  "LICENSE*",
-  "README.md",
-  "assets/",
-  "build.rs"
-]
+name = "slappyshot"
+version = "0.21.0"
+edition = "2024"
+description = "Screenshot annotation tool"
 
-[features]
-ci-release = []
+[[bin]]
+name = "slappyshot"
+path = "src/main.rs"
 
 [dependencies]
-satty_cli.workspace = true
-relm4 = { version = "0.10.1", features = ["macros", "libadwaita", "gnome_42"] }
-tokio = { version = "1.51.1", features = ["time"] }
-
-# error handling
-anyhow = "1.0"
-thiserror = "2.0"
-
-# command line
-clap.workspace = true
-
-# configuration file
-xdg = "^3.0"
-toml = "1.1.0"
-serde.workspace = true
-serde_derive = "1.0"
-hex_color = {version = "3", features = ["serde"]}
-chrono = "0.4.44"
-
-# opengl rendering backend
-femtovg = "0.23"
-libloading = "0.9"
-epoxy = "0.1.0"
-glow = "0.17.0"
-resource = "0.6.1"  # font emedding
-fontconfig = "0.10.0"  # font loading
-keycode = "1.0.0"
-
-[dependencies.relm4-icons]
-version = "0.10.0"
-
+eframe    = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui      = "0.29"
+image     = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
+clap      = { version = "4", features = ["derive"] }
+serde     = { version = "1", features = ["derive"] }
+toml      = "1"
+chrono    = "0.4"
+xdg       = "3"
+anyhow    = "1"
+hex_color = { version = "3", features = ["serde"] }
+ab_glyph  = "0.2"
+imageproc = "0.25"
+arboard   = "3"
+notosans  = "0.1"
 
 [build-dependencies]
-clap.workspace = true
-clap_complete = "4.6.2"
-clap_complete_nushell = "4.6.0"
-satty_cli.workspace = true
-clap_complete_fig = "4.5.2"
-relm4-icons-build = "0.10"
-clap_mangen = "0.3.0"
-
-[workspace]
-members = [ "cli" ]
-
-[workspace.package]
-version = "0.20.1"
-edition = "2024"
-authors = ["Matthias Gabriel <gabm+aur@mailbox.org>"]
-description = "Modern Screenshot Annotation."
-homepage = "https://github.com/Satty-org/Satty"
-repository = "https://github.com/Satty-org/Satty"
-license = "MPL-2.0"
-
-[workspace.dependencies]
-clap = { version = "4.6.0", features = ["derive"] }
-satty_cli = { path = "cli", version = "0.20.1" }
-serde = { version = "1.0", features = ["derive"] }
+clap          = { version = "4", features = ["derive"] }
+clap_complete = "4"
+clap_mangen   = "0.3"
