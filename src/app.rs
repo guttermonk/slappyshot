@@ -963,8 +963,8 @@ impl eframe::App for App {
                         let selected = self.active_tool == tool;
                         if ui
                             .add_sized(
-                                [22.0, 22.0],
-                                egui::SelectableLabel::new(selected, tool.icon()),
+                                [30.0, 30.0],
+                                egui::SelectableLabel::new(selected, egui::RichText::new(tool.icon()).size(20.0)),
                             )
                             .on_hover_text(tool.label())
                             .clicked()
@@ -974,14 +974,14 @@ impl eframe::App for App {
                     }
                     ui.separator();
                     if ui
-                        .add_sized([22.0, 22.0], egui::Button::new("↩"))
+                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("↩").size(20.0)))
                         .on_hover_text("Undo")
                         .clicked()
                     {
                         self.undo();
                     }
                     if ui
-                        .add_sized([22.0, 22.0], egui::Button::new("↪"))
+                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("↪").size(20.0)))
                         .on_hover_text("Redo")
                         .clicked()
                     {
@@ -989,14 +989,14 @@ impl eframe::App for App {
                     }
                     ui.separator();
                     if ui
-                        .add_sized([22.0, 22.0], egui::Button::new("⎘"))
+                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("⎘").size(20.0)))
                         .on_hover_text("Copy")
                         .clicked()
                     {
                         self.pending_copy = true;
                     }
                     if ui
-                        .add_sized([22.0, 22.0], egui::Button::new("💾"))
+                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("💾").size(20.0)))
                         .on_hover_text("Save")
                         .clicked()
                     {
