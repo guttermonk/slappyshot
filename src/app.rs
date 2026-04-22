@@ -1070,7 +1070,7 @@ impl eframe::App for App {
             });
 
         // Enforce minimum window width to fit the toolbar
-        let min_toolbar_w = self.top_toolbar_content_width.max(self.bottom_toolbar_content_width);
+        let min_toolbar_w = self.top_toolbar_content_width.max(self.bottom_toolbar_content_width) + 20.0;
         if min_toolbar_w < 9999.0 {
             ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(min_toolbar_w, 300.0)));
             if !self.toolbar_min_width_applied {
