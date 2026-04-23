@@ -36,6 +36,22 @@ impl ToolType {
         }
     }
 
+    pub fn config_name(&self) -> &str {
+        match self {
+            ToolType::Pointer => "pointer",
+            ToolType::Crop => "crop",
+            ToolType::Brush => "brush",
+            ToolType::Line => "line",
+            ToolType::Arrow => "arrow",
+            ToolType::Rectangle => "rectangle",
+            ToolType::Ellipse => "ellipse",
+            ToolType::Text => "text",
+            ToolType::Marker => "marker",
+            ToolType::Blur => "blur",
+            ToolType::Highlight => "highlight",
+        }
+    }
+
     pub fn icon(&self) -> &str {
         match self {
             ToolType::Pointer => "↖",

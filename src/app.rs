@@ -9,6 +9,13 @@ use crate::tools::{
     ToolType, tool_from_string,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PointerDrag {
+    None,
+    Panning,
+    MovingAnnotation(usize),
+}
+
 pub struct App {
     source_image: RgbaImage,
     base_texture: Option<egui::TextureHandle>,
@@ -34,6 +41,7 @@ pub struct App {
     top_toolbar_content_width: f32,
     bottom_toolbar_content_width: f32,
     toolbar_min_width_applied: bool,
+    pointer_drag: PointerDrag,
 }
 
 impl App {
@@ -84,6 +92,7 @@ impl App {
             top_toolbar_content_width: 9999.0,
             bottom_toolbar_content_width: 9999.0,
             toolbar_min_width_applied: false,
+            pointer_drag: PointerDrag::None,
         }
     }
 
@@ -172,6 +181,18 @@ impl App {
         self.active_drawing = ActiveDrawing::None;
         self.drag_start = None;
         self.active_tool = tool;
+    }
+
+    fn zoom_step(&mut self, factor: f32) {
+        if self.canvas_rect.is_finite() {
+            let center = self.canvas_rect.center();
+            let img_pos = self.screen_to_image(center);
+            self.zoom = (self.zoom * factor).clamp(0.05, 50.0);
+            let new_screen = self.image_to_screen(img_pos);
+            self.pan += center.to_vec2() - new_screen.to_vec2();
+        } else {
+            self.zoom = (self.zoom * factor).clamp(0.05, 50.0);
+        }
     }
 
     fn copy_to_clipboard_action(&self) {
@@ -653,13 +674,24 @@ impl App {
                 self.execute_actions(actions);
             }
 
-            // Tool shortcuts
+            // Tool shortcuts and zoom shortcuts
+            let zoom_factor = self.config.general.zoom_factor;
             for s in &key_events {
                 if let Some(c) = s.chars().next() {
-                    let keybinds = self.config.keybind_map();
-                    if let Some(tool_name) = keybinds.get(&c) {
-                        if let Some(tool) = tool_from_string(tool_name) {
-                            self.switch_tool(tool);
+                    match c {
+                        '=' | '+' => self.zoom_step(zoom_factor),
+                        '-' => self.zoom_step(1.0 / zoom_factor),
+                        '0' => {
+                            self.zoom = 1.0;
+                            self.pan = Vec2::ZERO;
+                        }
+                        _ => {
+                            let keybinds = self.config.keybind_map();
+                            if let Some(tool_name) = keybinds.get(&c) {
+                                if let Some(tool) = tool_from_string(tool_name) {
+                                    self.switch_tool(tool);
+                                }
+                            }
                         }
                     }
                 }
@@ -870,49 +902,92 @@ impl App {
 
         let modifiers = ctx.input(|i| i.modifiers);
 
-        // Primary button drag start
-        if response.drag_started_by(egui::PointerButton::Primary) {
-            if let Some(origin) = ctx.input(|i| i.pointer.press_origin()) {
-                if self.is_inside_image(origin) {
-                    let img_pos = self.clamp_to_image(self.screen_to_image(origin));
-                    self.drag_start = Some(img_pos);
-                    self.on_drag_begin(img_pos, modifiers);
+        if self.active_tool == ToolType::Pointer {
+            // Pointer tool: pan canvas or move annotation with primary drag
+            if response.drag_started_by(egui::PointerButton::Primary) {
+                if let Some(origin) = ctx.input(|i| i.pointer.press_origin()) {
+                    if self.is_inside_image(origin) {
+                        let img_pos = self.screen_to_image(origin);
+                        let threshold = 8.0 / self.zoom;
+                        let hit_idx = self
+                            .annotations
+                            .iter()
+                            .enumerate()
+                            .rev()
+                            .find(|(_, ann)| annotation_hit_test(ann, img_pos, threshold))
+                            .map(|(idx, _)| idx);
+                        if let Some(idx) = hit_idx {
+                            self.undo_stack.push(self.annotations.clone());
+                            self.redo_stack.clear();
+                            self.pointer_drag = PointerDrag::MovingAnnotation(idx);
+                        } else {
+                            self.pointer_drag = PointerDrag::Panning;
+                        }
+                    }
                 }
             }
-        }
-
-        // Primary drag update
-        if response.dragged_by(egui::PointerButton::Primary) {
-            if let (Some(start), Some(hover)) =
-                (self.drag_start, ctx.input(|i| i.pointer.hover_pos()))
-            {
-                let current = self.clamp_to_image(self.screen_to_image(hover));
-                let delta_vec = current.to_vec2() - start.to_vec2();
-                let delta_pos = Pos2::new(delta_vec.x, delta_vec.y);
-                self.on_drag_update(start, delta_pos, modifiers);
+            if response.dragged_by(egui::PointerButton::Primary) {
+                match self.pointer_drag {
+                    PointerDrag::Panning => {
+                        self.pan += response.drag_delta();
+                    }
+                    PointerDrag::MovingAnnotation(idx) => {
+                        let delta = response.drag_delta() / self.zoom;
+                        if idx < self.annotations.len() {
+                            shift_annotation(&mut self.annotations[idx], delta.x, delta.y);
+                        }
+                    }
+                    PointerDrag::None => {}
+                }
             }
-        }
-
-        // Primary drag end
-        let drag_released = response.drag_stopped_by(egui::PointerButton::Primary);
-        if drag_released {
-            if let Some(start) = self.drag_start.take() {
-                let hover = ctx
-                    .input(|i| i.pointer.hover_pos())
-                    .map(|p| self.clamp_to_image(self.screen_to_image(p)))
-                    .unwrap_or(start);
-                let delta_vec = hover.to_vec2() - start.to_vec2();
-                let delta_pos = Pos2::new(delta_vec.x, delta_vec.y);
-                self.on_drag_end(start, delta_pos, modifiers);
+            if response.drag_stopped_by(egui::PointerButton::Primary) {
+                self.pointer_drag = PointerDrag::None;
             }
-        }
+        } else {
+            // Primary button drag start
+            if response.drag_started_by(egui::PointerButton::Primary) {
+                if let Some(origin) = ctx.input(|i| i.pointer.press_origin()) {
+                    if self.is_inside_image(origin) {
+                        let img_pos = self.clamp_to_image(self.screen_to_image(origin));
+                        self.drag_start = Some(img_pos);
+                        self.on_drag_begin(img_pos, modifiers);
+                    }
+                }
+            }
 
-        // Click (single press-release without drag)
-        if response.clicked_by(egui::PointerButton::Primary) {
-            if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                if self.is_inside_image(pos) {
-                    let img_pos = self.clamp_to_image(self.screen_to_image(pos));
-                    self.on_click(img_pos, modifiers);
+            // Primary drag update
+            if response.dragged_by(egui::PointerButton::Primary) {
+                if let (Some(start), Some(hover)) =
+                    (self.drag_start, ctx.input(|i| i.pointer.hover_pos()))
+                {
+                    let current = self.clamp_to_image(self.screen_to_image(hover));
+                    let delta_vec = current.to_vec2() - start.to_vec2();
+                    let delta_pos = Pos2::new(delta_vec.x, delta_vec.y);
+                    self.on_drag_update(start, delta_pos, modifiers);
+                }
+            }
+
+            // Primary drag end
+            let drag_released = response.drag_stopped_by(egui::PointerButton::Primary);
+            if drag_released {
+                if let Some(start) = self.drag_start.take() {
+                    let hover = ctx
+                        .input(|i| i.pointer.hover_pos())
+                        .map(|p| self.clamp_to_image(self.screen_to_image(p)))
+                        .unwrap_or(start);
+                    let delta_vec = hover.to_vec2() - start.to_vec2();
+                    let delta_pos = Pos2::new(delta_vec.x, delta_vec.y);
+                    self.on_drag_end(start, delta_pos, modifiers);
+                }
+            }
+
+            // Click (single press-release without drag)
+            if response.clicked_by(egui::PointerButton::Primary) {
+                if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
+                    if self.is_inside_image(pos) {
+                        let img_pos = self.clamp_to_image(self.screen_to_image(pos));
+                        self.on_click(img_pos, modifiers);
+                    }
                 }
             }
         }
@@ -972,6 +1047,9 @@ impl eframe::App for App {
                 let leading = ((available - self.top_toolbar_content_width) / 2.0).max(0.0);
                 let r = ui.horizontal(|ui| {
                     ui.add_space(leading);
+                    let keybind_map = self.config.keybind_map();
+                    let tool_key_map: std::collections::HashMap<String, char> =
+                        keybind_map.into_iter().map(|(k, v)| (v, k)).collect();
                     for &tool in &[
                         ToolType::Pointer,
                         ToolType::Crop,
@@ -986,12 +1064,17 @@ impl eframe::App for App {
                         ToolType::Highlight,
                     ] {
                         let selected = self.active_tool == tool;
+                        let tooltip = if let Some(&key) = tool_key_map.get(tool.config_name()) {
+                            format!("{} ({})", tool.label(), key)
+                        } else {
+                            tool.label().to_string()
+                        };
                         if ui
                             .add_sized(
                                 [30.0, 30.0],
                                 egui::SelectableLabel::new(selected, egui::RichText::new(tool.icon()).size(20.0)),
                             )
-                            .on_hover_text(tool.label())
+                            .on_hover_text(tooltip)
                             .clicked()
                         {
                             self.switch_tool(tool);
@@ -1082,8 +1165,23 @@ impl eframe::App for App {
                     ui.separator();
                     ui.toggle_value(&mut self.style.fill, "Fill");
                     ui.separator();
+                    let zoom_factor = self.config.general.zoom_factor;
+                    if ui
+                        .add_sized([22.0, 22.0], egui::Button::new(egui::RichText::new("−").size(16.0)))
+                        .on_hover_text("Zoom Out (-)")
+                        .clicked()
+                    {
+                        self.zoom_step(1.0 / zoom_factor);
+                    }
                     ui.label(format!("Zoom: {:.0}%", self.zoom * 100.0));
-                    if ui.button("Reset").clicked() {
+                    if ui
+                        .add_sized([22.0, 22.0], egui::Button::new(egui::RichText::new("+").size(16.0)))
+                        .on_hover_text("Zoom In (=)")
+                        .clicked()
+                    {
+                        self.zoom_step(zoom_factor);
+                    }
+                    if ui.button("Reset").on_hover_text("Reset Zoom (0)").clicked() {
                         self.zoom = 1.0;
                         self.pan = Vec2::ZERO;
                     }
@@ -1514,6 +1612,66 @@ fn normalize_rect(top_left: Pos2, size: Vec2) -> (Pos2, Vec2) {
         top_left.y
     };
     (Pos2::new(x, y), Vec2::new(size.x.abs(), size.y.abs()))
+}
+
+fn point_to_segment_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
+    let ab = b - a;
+    let ap = p - a;
+    let len_sq = ab.x * ab.x + ab.y * ab.y;
+    if len_sq < 1e-6 {
+        return ap.length();
+    }
+    let t = ((ap.x * ab.x + ap.y * ab.y) / len_sq).clamp(0.0, 1.0);
+    p.distance(a + ab * t)
+}
+
+fn annotation_hit_test(ann: &Annotation, pos: Pos2, threshold: f32) -> bool {
+    match ann {
+        Annotation::Arrow { start, end, .. } | Annotation::Line { start, end, .. } => {
+            point_to_segment_dist(pos, *start, *end) < threshold
+        }
+        Annotation::Rectangle { top_left, size, .. } => {
+            Rect::from_two_pos(*top_left, *top_left + *size)
+                .expand(threshold)
+                .contains(pos)
+        }
+        Annotation::Ellipse { center, radii, .. } => {
+            let dx = (pos.x - center.x) / (radii.x + threshold);
+            let dy = (pos.y - center.y) / (radii.y + threshold);
+            dx * dx + dy * dy <= 1.0
+        }
+        Annotation::Brush { start, points, .. } => {
+            if pos.distance(*start) < threshold {
+                return true;
+            }
+            points.iter().any(|&d| {
+                pos.distance(Pos2::new(start.x + d.x, start.y + d.y)) < threshold
+            })
+        }
+        Annotation::Text { pos: ann_pos, .. } | Annotation::Marker { pos: ann_pos, .. } => {
+            pos.distance(*ann_pos) < threshold * 3.0
+        }
+        Annotation::Blur { top_left, size, .. } => {
+            Rect::from_two_pos(*top_left, *top_left + *size)
+                .expand(threshold)
+                .contains(pos)
+        }
+        Annotation::Highlight { kind, .. } => match kind {
+            HighlightAnnotation::Block { top_left, size } => {
+                Rect::from_two_pos(*top_left, *top_left + *size)
+                    .expand(threshold)
+                    .contains(pos)
+            }
+            HighlightAnnotation::Freehand { start, points } => {
+                if pos.distance(*start) < threshold {
+                    return true;
+                }
+                points.iter().any(|&d| {
+                    pos.distance(Pos2::new(start.x + d.x, start.y + d.y)) < threshold
+                })
+            }
+        },
+    }
 }
 
 fn shift_annotation(ann: &mut Annotation, dx: f32, dy: f32) {
