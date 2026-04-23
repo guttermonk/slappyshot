@@ -1153,7 +1153,7 @@ impl eframe::App for App {
                         self.pending_copy = true;
                     }
                     if ui
-                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("💾").size(20.0)))
+                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("\u{F0C7}").size(20.0)))
                         .on_hover_text("Save (s)")
                         .clicked()
                     {
@@ -1265,64 +1265,77 @@ impl eframe::App for App {
             }
         }
 
-        // Info window
+        // Info window (separate OS window)
         if self.show_info {
-            egui::Window::new("Keyboard Shortcuts")
-                .open(&mut self.show_info)
-                .resizable(false)
-                .collapsible(false)
-                .show(ctx, |ui| {
-                    egui::Grid::new("info_grid")
-                        .num_columns(2)
-                        .spacing([16.0, 4.0])
-                        .striped(true)
-                        .show(ui, |ui| {
-                            let header = |ui: &mut egui::Ui, text: &str| {
-                                ui.strong(text);
-                                ui.end_row();
-                            };
-                            let row = |ui: &mut egui::Ui, shortcut: &str, action: &str| {
-                                ui.monospace(shortcut);
-                                ui.label(action);
-                                ui.end_row();
-                            };
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("info_window"),
+                egui::ViewportBuilder::default()
+                    .with_title("Keyboard Shortcuts")
+                    .with_inner_size([400.0, 500.0])
+                    .with_resizable(true)
+                    .with_minimize_button(false)
+                    .with_maximize_button(false),
+                |ctx, _class| {
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        self.show_info = false;
+                    }
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            egui::Grid::new("info_grid")
+                                .num_columns(2)
+                                .spacing([16.0, 4.0])
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    let header = |ui: &mut egui::Ui, text: &str| {
+                                        ui.strong(text);
+                                        ui.end_row();
+                                    };
+                                    let row =
+                                        |ui: &mut egui::Ui, shortcut: &str, action: &str| {
+                                            ui.monospace(shortcut);
+                                            ui.label(action);
+                                            ui.end_row();
+                                        };
 
-                            header(ui, "Navigation");
-                            row(ui, "Scroll wheel", "Zoom in / out (centered on cursor)");
-                            row(ui, "= / +", "Zoom in");
-                            row(ui, "-", "Zoom out");
-                            row(ui, "0", "Reset zoom");
-                            row(ui, "Middle drag", "Pan");
-                            row(ui, "Pointer + drag", "Pan canvas");
-                            row(ui, "Pointer + drag annotation", "Move annotation");
+                                    header(ui, "Navigation");
+                                    row(ui, "Scroll wheel", "Zoom in / out (centered on cursor)");
+                                    row(ui, "= / +", "Zoom in");
+                                    row(ui, "-", "Zoom out");
+                                    row(ui, "0", "Reset zoom");
+                                    row(ui, "Middle drag", "Pan");
+                                    row(ui, "Pointer + drag", "Pan canvas");
+                                    row(ui, "Pointer + drag annotation", "Move annotation");
 
-                            ui.end_row();
-                            header(ui, "Tool Modifiers");
-                            row(ui, "Shift + Arrow / Line", "Snap to 15° angle increments");
-                            row(ui, "Shift + Rect / Ellipse", "Constrain to square / circle");
+                                    ui.end_row();
+                                    header(ui, "Tool Modifiers");
+                                    row(ui, "Shift + Arrow / Line", "Snap to 15° angle increments");
+                                    row(ui, "Shift + Rect / Ellipse", "Constrain to square / circle");
 
-                            ui.end_row();
-                            header(ui, "Style");
-                            row(ui, "1 – 6", "Select palette color");
-                            row(ui, "7 / 8 / 9", "Small / Medium / Large size");
-                            row(ui, "f", "Toggle fill");
+                                    ui.end_row();
+                                    header(ui, "Style");
+                                    row(ui, "1 – 6", "Select palette color");
+                                    row(ui, "7 / 8 / 9", "Small / Medium / Large size");
+                                    row(ui, "f", "Toggle fill");
 
-                            ui.end_row();
-                            header(ui, "Actions");
-                            row(ui, "z / Ctrl+Z", "Undo");
-                            row(ui, "y / Ctrl+Y", "Redo");
-                            row(ui, "c / Ctrl+C", "Copy to clipboard");
-                            row(ui, "s / Ctrl+S", "Save to file");
-                            row(ui, "Ctrl+T", "Toggle toolbars");
-                            row(ui, "Enter", "Configurable (default: copy & exit)");
-                            row(ui, "Escape", "Configurable (default: exit)");
+                                    ui.end_row();
+                                    header(ui, "Actions");
+                                    row(ui, "z / Ctrl+Z", "Undo");
+                                    row(ui, "y / Ctrl+Y", "Redo");
+                                    row(ui, "c / Ctrl+C", "Copy to clipboard");
+                                    row(ui, "s / Ctrl+S", "Save to file");
+                                    row(ui, "Ctrl+T", "Toggle toolbars");
+                                    row(ui, "Enter", "Configurable (default: copy & exit)");
+                                    row(ui, "Escape", "Configurable (default: exit)");
 
-                            ui.end_row();
-                            header(ui, "Tips");
-                            row(ui, "m (on Marker tool)", "Press again to reset counter to 1");
-                            row(ui, "d (Delete tool)", "Click an annotation to remove it");
+                                    ui.end_row();
+                                    header(ui, "Tips");
+                                    row(ui, "m (on Marker tool)", "Press again to reset counter to 1");
+                                    row(ui, "d (Delete tool)", "Click an annotation to remove it");
+                                });
                         });
-                });
+                    });
+                },
+            );
         }
 
         // Central panel
