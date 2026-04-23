@@ -1240,15 +1240,13 @@ impl eframe::App for App {
                         self.zoom = 1.0;
                         self.pan = Vec2::ZERO;
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_sized([22.0, 22.0], egui::Button::new(egui::RichText::new("ℹ").size(14.0)))
-                            .on_hover_text("Keyboard Shortcuts")
-                            .clicked()
-                        {
-                            self.show_info = !self.show_info;
-                        }
-                    });
+                    if ui
+                        .add_sized([22.0, 22.0], egui::Button::new(egui::RichText::new("ℹ").size(14.0)))
+                        .on_hover_text("Keyboard Shortcuts")
+                        .clicked()
+                    {
+                        self.show_info = !self.show_info;
+                    }
                 });
                 self.bottom_toolbar_content_width = r.response.rect.width() - leading;
             });
