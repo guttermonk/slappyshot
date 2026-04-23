@@ -1,4 +1,5 @@
 use egui::{Color32, Pos2, Rect, Rounding, Stroke, Vec2};
+use std::time::Instant;
 use image::RgbaImage;
 
 use crate::config::{Action, Config, apply_theme};
@@ -42,6 +43,8 @@ pub struct App {
     bottom_toolbar_content_width: f32,
     toolbar_min_width_applied: bool,
     pointer_drag: PointerDrag,
+    key_flash: Option<(ToolType, Instant)>,
+    show_info: bool,
 }
 
 impl App {
@@ -93,6 +96,8 @@ impl App {
             bottom_toolbar_content_width: 9999.0,
             toolbar_min_width_applied: false,
             pointer_drag: PointerDrag::None,
+            key_flash: None,
+            show_info: false,
         }
     }
 
@@ -177,7 +182,9 @@ impl App {
     }
 
     fn switch_tool(&mut self, tool: ToolType) {
-        // Cancel any active drawing
+        if tool == ToolType::Marker && self.active_tool == ToolType::Marker {
+            self.marker_counter = 1;
+        }
         self.active_drawing = ActiveDrawing::None;
         self.drag_start = None;
         self.active_tool = tool;
@@ -351,7 +358,7 @@ impl App {
                     active: true,
                 });
             }
-            ToolType::Pointer | ToolType::Text | ToolType::Marker => {}
+            ToolType::Pointer | ToolType::Text | ToolType::Marker | ToolType::Delete => {}
         }
         let _ = modifiers;
     }
@@ -615,6 +622,21 @@ impl App {
                     content: String::new(),
                 };
             }
+            ToolType::Delete => {
+                let threshold = 8.0 / self.zoom;
+                let hit_idx = self
+                    .annotations
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(_, ann)| annotation_hit_test(ann, img_pos, threshold))
+                    .map(|(idx, _)| idx);
+                if let Some(idx) = hit_idx {
+                    self.undo_stack.push(self.annotations.clone());
+                    self.redo_stack.clear();
+                    self.annotations.remove(idx);
+                }
+            }
             _ => {}
         }
     }
@@ -685,11 +707,27 @@ impl App {
                             self.zoom = 1.0;
                             self.pan = Vec2::ZERO;
                         }
+                        '1'..='6' => {
+                            let idx = (c as u8 - b'1') as usize;
+                            let palette = self.config.palette_colors();
+                            if let Some(&(r, g, b, a)) = palette.get(idx) {
+                                self.style.color = Color { r, g, b, a };
+                            }
+                        }
+                        '7' => self.style.size = Size::Small,
+                        '8' => self.style.size = Size::Medium,
+                        '9' => self.style.size = Size::Large,
+                        'f' => self.style.fill = !self.style.fill,
+                        'c' => self.pending_copy = true,
+                        's' => self.pending_save = true,
+                        'z' => self.undo(),
+                        'y' => self.redo(),
                         _ => {
                             let keybinds = self.config.keybind_map();
                             if let Some(tool_name) = keybinds.get(&c) {
                                 if let Some(tool) = tool_from_string(tool_name) {
                                     self.switch_tool(tool);
+                                    self.key_flash = Some((tool, Instant::now()));
                                 }
                             }
                         }
@@ -1062,6 +1100,7 @@ impl eframe::App for App {
                         ToolType::Marker,
                         ToolType::Blur,
                         ToolType::Highlight,
+                        ToolType::Delete,
                     ] {
                         let selected = self.active_tool == tool;
                         let tooltip = if let Some(&key) = tool_key_map.get(tool.config_name()) {
@@ -1069,43 +1108,53 @@ impl eframe::App for App {
                         } else {
                             tool.label().to_string()
                         };
-                        if ui
+                        let resp = ui
                             .add_sized(
                                 [30.0, 30.0],
                                 egui::SelectableLabel::new(selected, egui::RichText::new(tool.icon()).size(20.0)),
                             )
-                            .on_hover_text(tooltip)
-                            .clicked()
-                        {
+                            .on_hover_text(tooltip);
+                        // Draw a momentary white border when activated by keyboard
+                        if let Some((flash_tool, flash_time)) = self.key_flash {
+                            if flash_tool == tool && flash_time.elapsed().as_millis() < 150 {
+                                ui.painter().rect_stroke(
+                                    resp.rect,
+                                    Rounding::same(2.0),
+                                    Stroke::new(2.0, Color32::WHITE),
+                                );
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                        if resp.clicked() {
                             self.switch_tool(tool);
                         }
                     }
                     ui.separator();
                     if ui
                         .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("↩").size(20.0)))
-                        .on_hover_text("Undo")
+                        .on_hover_text("Undo (z)")
                         .clicked()
                     {
                         self.undo();
                     }
                     if ui
                         .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("↪").size(20.0)))
-                        .on_hover_text("Redo")
+                        .on_hover_text("Redo (y)")
                         .clicked()
                     {
                         self.redo();
                     }
                     ui.separator();
                     if ui
-                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("⎘").size(20.0)))
-                        .on_hover_text("Copy")
+                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("⧉").size(20.0)))
+                        .on_hover_text("Copy (c)")
                         .clicked()
                     {
                         self.pending_copy = true;
                     }
                     if ui
                         .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("💾").size(20.0)))
-                        .on_hover_text("Save")
+                        .on_hover_text("Save (s)")
                         .clicked()
                     {
                         self.pending_save = true;
@@ -1131,7 +1180,7 @@ impl eframe::App for App {
                     ui.add_space(leading);
                     ui.spacing_mut().interact_size.y = 22.0;
                     let palette = self.config.palette_colors();
-                    for &(r, g, b, a) in &palette {
+                    for (idx, &(r, g, b, a)) in palette.iter().enumerate() {
                         let c = Color32::from_rgba_unmultiplied(r, g, b, a);
                         let selected = self.style.color == Color { r, g, b, a };
                         let (resp, painter) =
@@ -1144,26 +1193,32 @@ impl eframe::App for App {
                                 Stroke::new(2.0, Color32::WHITE),
                             );
                         }
+                        let key = (b'1' + idx as u8) as char;
+                        let resp = resp.on_hover_text(format!("Color {} ({})", idx + 1, key));
                         if resp.clicked() {
                             self.style.color = Color { r, g, b, a };
                         }
                     }
                     ui.separator();
-                    for (size, label) in
-                        &[(Size::Small, "S"), (Size::Medium, "M"), (Size::Large, "L")]
-                    {
+                    for (size, label, key) in &[
+                        (Size::Small, "S", '7'),
+                        (Size::Medium, "M", '8'),
+                        (Size::Large, "L", '9'),
+                    ] {
                         if ui
                             .add_sized(
                                 [22.0, 22.0],
                                 egui::SelectableLabel::new(self.style.size == *size, *label),
                             )
+                            .on_hover_text(format!("{} ({})", size.label(), key))
                             .clicked()
                         {
                             self.style.size = *size;
                         }
                     }
                     ui.separator();
-                    ui.toggle_value(&mut self.style.fill, "Fill");
+                    ui.toggle_value(&mut self.style.fill, "Fill")
+                        .on_hover_text("Fill (f)");
                     ui.separator();
                     let zoom_factor = self.config.general.zoom_factor;
                     if ui
@@ -1185,6 +1240,15 @@ impl eframe::App for App {
                         self.zoom = 1.0;
                         self.pan = Vec2::ZERO;
                     }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_sized([22.0, 22.0], egui::Button::new(egui::RichText::new("ℹ").size(14.0)))
+                            .on_hover_text("Keyboard Shortcuts")
+                            .clicked()
+                        {
+                            self.show_info = !self.show_info;
+                        }
+                    });
                 });
                 self.bottom_toolbar_content_width = r.response.rect.width() - leading;
             });
@@ -1201,6 +1265,66 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(min_toolbar_w, current_h)));
                 }
             }
+        }
+
+        // Info window
+        if self.show_info {
+            egui::Window::new("Keyboard Shortcuts")
+                .open(&mut self.show_info)
+                .resizable(false)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    egui::Grid::new("info_grid")
+                        .num_columns(2)
+                        .spacing([16.0, 4.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            let header = |ui: &mut egui::Ui, text: &str| {
+                                ui.strong(text);
+                                ui.end_row();
+                            };
+                            let row = |ui: &mut egui::Ui, shortcut: &str, action: &str| {
+                                ui.monospace(shortcut);
+                                ui.label(action);
+                                ui.end_row();
+                            };
+
+                            header(ui, "Navigation");
+                            row(ui, "Scroll wheel", "Zoom in / out (centered on cursor)");
+                            row(ui, "= / +", "Zoom in");
+                            row(ui, "-", "Zoom out");
+                            row(ui, "0", "Reset zoom");
+                            row(ui, "Middle drag", "Pan");
+                            row(ui, "Pointer + drag", "Pan canvas");
+                            row(ui, "Pointer + drag annotation", "Move annotation");
+
+                            ui.end_row();
+                            header(ui, "Tool Modifiers");
+                            row(ui, "Shift + Arrow / Line", "Snap to 15° angle increments");
+                            row(ui, "Shift + Rect / Ellipse", "Constrain to square / circle");
+
+                            ui.end_row();
+                            header(ui, "Style");
+                            row(ui, "1 – 6", "Select palette color");
+                            row(ui, "7 / 8 / 9", "Small / Medium / Large size");
+                            row(ui, "f", "Toggle fill");
+
+                            ui.end_row();
+                            header(ui, "Actions");
+                            row(ui, "z / Ctrl+Z", "Undo");
+                            row(ui, "y / Ctrl+Y", "Redo");
+                            row(ui, "c / Ctrl+C", "Copy to clipboard");
+                            row(ui, "s / Ctrl+S", "Save to file");
+                            row(ui, "Ctrl+T", "Toggle toolbars");
+                            row(ui, "Enter", "Configurable (default: copy & exit)");
+                            row(ui, "Escape", "Configurable (default: exit)");
+
+                            ui.end_row();
+                            header(ui, "Tips");
+                            row(ui, "m (on Marker tool)", "Press again to reset counter to 1");
+                            row(ui, "d (Delete tool)", "Click an annotation to remove it");
+                        });
+                });
         }
 
         // Central panel

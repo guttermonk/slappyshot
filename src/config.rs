@@ -137,6 +137,7 @@ pub struct KeybindsConfig {
     pub marker: Option<String>,
     pub blur: Option<String>,
     pub highlight: Option<String>,
+    pub delete: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -203,16 +204,17 @@ impl Config {
         // defaults
         let defaults: &[(&str, char)] = &[
             ("pointer", 'p'),
-            ("crop", 'c'),
+            ("crop", 'x'),
             ("brush", 'b'),
-            ("line", 'i'),
-            ("arrow", 'z'),
+            ("line", 'l'),
+            ("arrow", 'a'),
             ("rectangle", 'r'),
             ("ellipse", 'e'),
             ("text", 't'),
             ("marker", 'm'),
-            ("blur", 'u'),
-            ("highlight", 'g'),
+            ("blur", 'w'),
+            ("highlight", 'h'),
+            ("delete", 'd'),
         ];
         for (tool, default_key) in defaults {
             let key = match *tool {
@@ -279,6 +281,12 @@ impl Config {
                 "highlight" => self
                     .keybinds
                     .highlight
+                    .as_ref()
+                    .and_then(|s| s.chars().next())
+                    .unwrap_or(*default_key),
+                "delete" => self
+                    .keybinds
+                    .delete
                     .as_ref()
                     .and_then(|s| s.chars().next())
                     .unwrap_or(*default_key),

@@ -55,6 +55,14 @@ pub enum Size {
 }
 
 impl Size {
+    pub fn label(self) -> &'static str {
+        match self {
+            Size::Small => "Small",
+            Size::Medium => "Medium",
+            Size::Large => "Large",
+        }
+    }
+
     pub fn to_text_size(self, size_factor: f32) -> i32 {
         match self {
             Size::Small => (16.0 * size_factor) as i32,

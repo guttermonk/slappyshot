@@ -19,35 +19,70 @@ grim - | slappyshot --filename - --output-filename ~/Pictures/shot-%Y-%m-%d_%H:%
 
 ## Tools
 
-| Icon | Tool | Shortcut |
-|------|------|----------|
-| ↖ | Pointer | `p` |
-| ✂ | Crop | `c` |
-| ✏ | Brush | `b` |
-| ∕ | Line | `i` |
-| ↗ | Arrow | `z` |
-| □ | Rectangle | `r` |
-| ○ | Ellipse | `e` |
-| T | Text | `t` |
-| # | Numbered Marker | `m` |
-| ≈ | Blur | `u` |
-| H | Highlight | `g` |
+| Icon | Tool | Shortcut | Notes |
+|------|------|----------|-------|
+| ↖ | Pointer | `p` | Drag canvas to pan; drag an annotation to move it |
+| ✂ | Crop | `x` | |
+| ✏ | Brush | `b` | |
+| ∕ | Line | `l` | |
+| ↗ | Arrow | `a` | |
+| □ | Rectangle | `r` | |
+| ○ | Ellipse | `e` | |
+| T | Text | `t` | |
+| # | Numbered Marker | `m` | Press `m` again to reset counter to 1 |
+| ≈ | Blur | `w` | |
+| H | Highlight | `h` | |
+| 🗑 | Delete | `d` | Click an annotation to delete it |
 
 Tool shortcuts are configurable via `[keybinds]` in the config file.
 
 ## Keyboard Shortcuts
 
+### Tools
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Z` | Undo |
-| `Ctrl+Y` | Redo |
-| `Ctrl+C` | Copy to clipboard |
-| `Ctrl+S` | Save to file |
+| `p` | Pointer |
+| `x` | Crop |
+| `b` | Brush |
+| `l` | Line |
+| `a` | Arrow |
+| `r` | Rectangle |
+| `e` | Ellipse |
+| `t` | Text |
+| `m` | Numbered Marker (press again to reset counter) |
+| `w` | Blur |
+| `h` | Highlight |
+| `d` | Delete |
+
+### Style
+| Shortcut | Action |
+|----------|--------|
+| `1` – `6` | Select palette color 1–6 |
+| `7` | Small size |
+| `8` | Medium size |
+| `9` | Large size |
+| `f` | Toggle fill |
+
+### Actions
+| Shortcut | Action |
+|----------|--------|
+| `z` / `Ctrl+Z` | Undo |
+| `y` / `Ctrl+Y` | Redo |
+| `c` / `Ctrl+C` | Copy to clipboard |
+| `s` / `Ctrl+S` | Save to file |
 | `Ctrl+T` | Toggle toolbars |
 | `Enter` | Configurable (default: copy + exit) |
 | `Escape` | Configurable (default: exit) |
-| Scroll wheel | Zoom |
+
+### Zoom & Pan
+| Shortcut | Action |
+|----------|--------|
+| `=` / `+` | Zoom in |
+| `-` | Zoom out |
+| `0` | Reset zoom |
+| Scroll wheel | Zoom (centered on cursor) |
 | Middle mouse drag | Pan |
+| Pointer tool drag | Pan (when not over an annotation) |
 
 ### Tool Modifiers
 
@@ -125,16 +160,17 @@ palette = ["#f0932b", "#eb4d4b", "#6ab04c", "#22a6b3", "#130f40", "#c825b8"]
 
 [keybinds]
 pointer   = "p"
-crop      = "c"
+crop      = "x"
 brush     = "b"
-line      = "i"
-arrow     = "z"
+line      = "l"
+arrow     = "a"
 rectangle = "r"
 ellipse   = "e"
 text      = "t"
 marker    = "m"
-blur      = "u"
-highlight = "g"
+blur      = "w"
+highlight = "h"
+delete    = "d"
 
 [theme]
 # Hex colors for UI theming (all optional)

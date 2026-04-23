@@ -17,6 +17,7 @@ pub enum ToolType {
     Blur,
     Highlight,
     Brush,
+    Delete,
 }
 
 impl ToolType {
@@ -33,6 +34,7 @@ impl ToolType {
             ToolType::Blur => "Blur",
             ToolType::Highlight => "Highlight",
             ToolType::Brush => "Brush",
+            ToolType::Delete => "Delete",
         }
     }
 
@@ -49,6 +51,7 @@ impl ToolType {
             ToolType::Marker => "marker",
             ToolType::Blur => "blur",
             ToolType::Highlight => "highlight",
+            ToolType::Delete => "delete",
         }
     }
 
@@ -60,11 +63,12 @@ impl ToolType {
             ToolType::Line => "∕",
             ToolType::Arrow => "↗",
             ToolType::Rectangle => "□",
-            ToolType::Ellipse => "○",
+            ToolType::Ellipse => "⬭",
             ToolType::Text => "T",
             ToolType::Marker => "#",
             ToolType::Blur => "≈",
             ToolType::Highlight => "H",
+            ToolType::Delete => "🗑",
         }
     }
 
@@ -89,6 +93,7 @@ pub fn tool_from_string(s: &str) -> Option<ToolType> {
         "blur" => Some(ToolType::Blur),
         "highlight" => Some(ToolType::Highlight),
         "brush" => Some(ToolType::Brush),
+        "delete" => Some(ToolType::Delete),
         _ => None,
     }
 }
