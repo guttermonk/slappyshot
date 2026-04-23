@@ -117,7 +117,27 @@ fn main() -> anyhow::Result<()> {
     eframe::run_native(
         "slappyshot",
         native_options,
-        Box::new(|_cc| Ok(Box::new(app) as Box<dyn eframe::App>)),
+        Box::new(|cc| {
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert(
+                "nerd_symbols".to_owned(),
+                egui::FontData::from_static(include_bytes!(
+                    "../assets/SymbolsNerdFont-Regular.ttf"
+                )),
+            );
+            fonts
+                .families
+                .get_mut(&egui::FontFamily::Proportional)
+                .unwrap()
+                .push("nerd_symbols".to_owned());
+            fonts
+                .families
+                .get_mut(&egui::FontFamily::Monospace)
+                .unwrap()
+                .push("nerd_symbols".to_owned());
+            cc.egui_ctx.set_fonts(fonts);
+            Ok(Box::new(app) as Box<dyn eframe::App>)
+        }),
     )
     .map_err(|e| anyhow::anyhow!("{}", e))?;
 

@@ -1146,7 +1146,7 @@ impl eframe::App for App {
                     }
                     ui.separator();
                     if ui
-                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("⧉").size(20.0)))
+                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("\u{F018F}").size(20.0)))
                         .on_hover_text("Copy (c)")
                         .clicked()
                     {

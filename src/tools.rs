@@ -59,16 +59,16 @@ impl ToolType {
         match self {
             ToolType::Pointer => "↖",
             ToolType::Crop => "✂",
-            ToolType::Brush => "✏",
+            ToolType::Brush => "\u{F00E3}",
             ToolType::Line => "∕",
             ToolType::Arrow => "↗",
-            ToolType::Rectangle => "□",
-            ToolType::Ellipse => "⬭",
-            ToolType::Text => "T",
+            ToolType::Rectangle => "\u{F0E5F}",
+            ToolType::Ellipse => "\u{F0EA1}",
+            ToolType::Text => "\u{F0284}",
             ToolType::Marker => "#",
             ToolType::Blur => "≈",
-            ToolType::Highlight => "H",
-            ToolType::Delete => "🗑",
+            ToolType::Highlight => "\u{EE5A}",
+            ToolType::Delete => "\u{F014}",
         }
     }
 
