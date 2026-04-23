@@ -1,6 +1,6 @@
 use egui::{Color32, Pos2, Rect, Rounding, Stroke, Vec2};
-use std::time::Instant;
 use image::RgbaImage;
+use std::time::Instant;
 
 use crate::config::{Action, Config, apply_theme};
 use crate::render::{compute_blur_pixels, copy_to_clipboard, render_to_image};
@@ -738,7 +738,6 @@ impl App {
         }
     }
 
-
     fn draw_active_preview(&self, painter: &egui::Painter, current_cursor: Option<Pos2>) {
         let zoom = self.zoom;
         let pan = self.pan;
@@ -1112,7 +1111,10 @@ impl eframe::App for App {
                         let resp = ui
                             .add_sized(
                                 [30.0, 30.0],
-                                egui::SelectableLabel::new(selected, egui::RichText::new(tool.icon()).size(20.0)),
+                                egui::SelectableLabel::new(
+                                    selected,
+                                    egui::RichText::new(tool.icon()).size(20.0),
+                                ),
                             )
                             .on_hover_text(tooltip);
                         // Draw a momentary white border when activated by keyboard
@@ -1132,14 +1134,20 @@ impl eframe::App for App {
                     }
                     ui.separator();
                     if ui
-                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("↩").size(20.0)))
+                        .add_sized(
+                            [30.0, 30.0],
+                            egui::Button::new(egui::RichText::new("↩").size(20.0)),
+                        )
                         .on_hover_text("Undo (z)")
                         .clicked()
                     {
                         self.undo();
                     }
                     if ui
-                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("↪").size(20.0)))
+                        .add_sized(
+                            [30.0, 30.0],
+                            egui::Button::new(egui::RichText::new("↪").size(20.0)),
+                        )
                         .on_hover_text("Redo (y)")
                         .clicked()
                     {
@@ -1147,14 +1155,20 @@ impl eframe::App for App {
                     }
                     ui.separator();
                     if ui
-                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("\u{F018F}").size(20.0)))
+                        .add_sized(
+                            [30.0, 30.0],
+                            egui::Button::new(egui::RichText::new("\u{F018F}").size(20.0)),
+                        )
                         .on_hover_text("Copy (c)")
                         .clicked()
                     {
                         self.pending_copy = true;
                     }
                     if ui
-                        .add_sized([30.0, 30.0], egui::Button::new(egui::RichText::new("\u{F0C7}").size(20.0)))
+                        .add_sized(
+                            [30.0, 30.0],
+                            egui::Button::new(egui::RichText::new("\u{F0C7}").size(20.0)),
+                        )
                         .on_hover_text("Save (s)")
                         .clicked()
                     {
@@ -1223,7 +1237,10 @@ impl eframe::App for App {
                     ui.separator();
                     let zoom_factor = self.config.general.zoom_factor;
                     if ui
-                        .add_sized([22.0, 22.0], egui::Button::new(egui::RichText::new("−").size(16.0)))
+                        .add_sized(
+                            [22.0, 22.0],
+                            egui::Button::new(egui::RichText::new("−").size(16.0)),
+                        )
                         .on_hover_text("Zoom Out (-)")
                         .clicked()
                     {
@@ -1231,7 +1248,10 @@ impl eframe::App for App {
                     }
                     ui.label(format!("Zoom: {:.0}%", self.zoom * 100.0));
                     if ui
-                        .add_sized([22.0, 22.0], egui::Button::new(egui::RichText::new("+").size(16.0)))
+                        .add_sized(
+                            [22.0, 22.0],
+                            egui::Button::new(egui::RichText::new("+").size(16.0)),
+                        )
                         .on_hover_text("Zoom In (=)")
                         .clicked()
                     {
@@ -1242,7 +1262,10 @@ impl eframe::App for App {
                         self.pan = Vec2::ZERO;
                     }
                     if ui
-                        .add_sized([22.0, 22.0], egui::Button::new(egui::RichText::new("ℹ").size(14.0)))
+                        .add_sized(
+                            [22.0, 22.0],
+                            egui::Button::new(egui::RichText::new("ℹ").size(14.0)),
+                        )
                         .on_hover_text("Keyboard Shortcuts")
                         .clicked()
                     {
@@ -1253,15 +1276,24 @@ impl eframe::App for App {
             });
 
         // Enforce minimum window width to fit the toolbar
-        let min_toolbar_w = self.top_toolbar_content_width.max(self.bottom_toolbar_content_width) + 20.0;
+        let min_toolbar_w = self
+            .top_toolbar_content_width
+            .max(self.bottom_toolbar_content_width)
+            + 20.0;
         if min_toolbar_w < 9999.0 {
-            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(min_toolbar_w, 300.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
+                min_toolbar_w,
+                300.0,
+            )));
             if !self.toolbar_min_width_applied {
                 self.toolbar_min_width_applied = true;
                 let current_w = ctx.screen_rect().width();
                 if current_w < min_toolbar_w {
                     let current_h = ctx.screen_rect().height();
-                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(min_toolbar_w, current_h)));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                        min_toolbar_w,
+                        current_h,
+                    )));
                 }
             }
         }
@@ -1272,7 +1304,7 @@ impl eframe::App for App {
                 egui::ViewportId::from_hash_of("info_window"),
                 egui::ViewportBuilder::default()
                     .with_title("Keyboard Shortcuts")
-                    .with_inner_size([420.0, 545.0])
+                    .with_inner_size([420.0, 565.0])
                     .with_resizable(false)
                     .with_minimize_button(false)
                     .with_maximize_button(false),
@@ -1280,17 +1312,23 @@ impl eframe::App for App {
                     if ctx.input(|i| {
                         i.viewport().close_requested()
                             || i.key_pressed(egui::Key::Escape)
-                            || i.events.iter().any(|e| matches!(e, egui::Event::Text(s) if s == "q"))
+                            || i.events
+                                .iter()
+                                .any(|e| matches!(e, egui::Event::Text(s) if s == "q"))
                     }) {
                         self.show_info = false;
                     }
                     egui::CentralPanel::default()
-                        .frame(
-                            egui::Frame::central_panel(&ctx.style())
-                                .inner_margin(egui::Margin { left: 16.0, right: 8.0, top: 8.0, bottom: 8.0 }),
-                        )
+                        .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(
+                            egui::Margin {
+                                left: 16.0,
+                                right: 8.0,
+                                top: 8.0,
+                                bottom: 8.0,
+                            },
+                        ))
                         .show(ctx, |ui| {
-                        egui::Grid::new("info_grid")
+                            egui::Grid::new("info_grid")
                                 .num_columns(2)
                                 .spacing([16.0, 4.0])
                                 .striped(true)
@@ -1299,12 +1337,11 @@ impl eframe::App for App {
                                         ui.strong(text);
                                         ui.end_row();
                                     };
-                                    let row =
-                                        |ui: &mut egui::Ui, shortcut: &str, action: &str| {
-                                            ui.monospace(shortcut);
-                                            ui.label(action);
-                                            ui.end_row();
-                                        };
+                                    let row = |ui: &mut egui::Ui, shortcut: &str, action: &str| {
+                                        ui.monospace(shortcut);
+                                        ui.label(action);
+                                        ui.end_row();
+                                    };
 
                                     header(ui, "Navigation");
                                     row(ui, "Scroll wheel", "Zoom in / out (centered on cursor)");
@@ -1318,7 +1355,11 @@ impl eframe::App for App {
                                     ui.end_row();
                                     header(ui, "Tool Modifiers");
                                     row(ui, "Shift + Arrow / Line", "Snap to 15° angle increments");
-                                    row(ui, "Shift + Rect / Ellipse", "Constrain to square / circle");
+                                    row(
+                                        ui,
+                                        "Shift + Rect / Ellipse",
+                                        "Constrain to square / circle",
+                                    );
 
                                     ui.end_row();
                                     header(ui, "Actions");
@@ -1333,10 +1374,14 @@ impl eframe::App for App {
 
                                     ui.end_row();
                                     header(ui, "Tips");
-                                    row(ui, "m (on Marker tool)", "Press again to reset counter to 1");
+                                    row(
+                                        ui,
+                                        "m (on Marker tool)",
+                                        "Press again to reset counter to 1",
+                                    );
                                     row(ui, "d (Delete tool)", "Click an annotation to remove it");
                                 });
-                    });
+                        });
                 },
             );
         }
@@ -1782,18 +1827,16 @@ fn annotation_hit_test(ann: &Annotation, pos: Pos2, threshold: f32) -> bool {
             if pos.distance(*start) < threshold {
                 return true;
             }
-            points.iter().any(|&d| {
-                pos.distance(Pos2::new(start.x + d.x, start.y + d.y)) < threshold
-            })
+            points
+                .iter()
+                .any(|&d| pos.distance(Pos2::new(start.x + d.x, start.y + d.y)) < threshold)
         }
         Annotation::Text { pos: ann_pos, .. } | Annotation::Marker { pos: ann_pos, .. } => {
             pos.distance(*ann_pos) < threshold * 3.0
         }
-        Annotation::Blur { top_left, size, .. } => {
-            Rect::from_two_pos(*top_left, *top_left + *size)
-                .expand(threshold)
-                .contains(pos)
-        }
+        Annotation::Blur { top_left, size, .. } => Rect::from_two_pos(*top_left, *top_left + *size)
+            .expand(threshold)
+            .contains(pos),
         Annotation::Highlight { kind, .. } => match kind {
             HighlightAnnotation::Block { top_left, size } => {
                 Rect::from_two_pos(*top_left, *top_left + *size)
@@ -1804,9 +1847,9 @@ fn annotation_hit_test(ann: &Annotation, pos: Pos2, threshold: f32) -> bool {
                 if pos.distance(*start) < threshold {
                     return true;
                 }
-                points.iter().any(|&d| {
-                    pos.distance(Pos2::new(start.x + d.x, start.y + d.y)) < threshold
-                })
+                points
+                    .iter()
+                    .any(|&d| pos.distance(Pos2::new(start.x + d.x, start.y + d.y)) < threshold)
             }
         },
     }
