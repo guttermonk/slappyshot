@@ -71,6 +71,7 @@ Tool shortcuts are configurable via `[keybinds]` in the config file.
 | `c` / `Ctrl+C` | Copy to clipboard |
 | `s` / `Ctrl+S` | Save to file |
 | `Ctrl+T` | Toggle toolbars |
+| `q` | Quit |
 | `Enter` | Configurable (default: copy + exit) |
 | `Escape` | Configurable (default: exit) |
 

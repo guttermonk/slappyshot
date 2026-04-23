@@ -722,6 +722,7 @@ impl App {
                         's' => self.pending_save = true,
                         'z' => self.undo(),
                         'y' => self.redo(),
+                        'q' => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
                         _ => {
                             let keybinds = self.config.keybind_map();
                             if let Some(tool_name) = keybinds.get(&c) {
@@ -1271,15 +1272,24 @@ impl eframe::App for App {
                 egui::ViewportId::from_hash_of("info_window"),
                 egui::ViewportBuilder::default()
                     .with_title("Keyboard Shortcuts")
-                    .with_inner_size([420.0, 530.0])
+                    .with_inner_size([420.0, 545.0])
                     .with_resizable(false)
                     .with_minimize_button(false)
                     .with_maximize_button(false),
                 |ctx, _class| {
-                    if ctx.input(|i| i.viewport().close_requested()) {
+                    if ctx.input(|i| {
+                        i.viewport().close_requested()
+                            || i.key_pressed(egui::Key::Escape)
+                            || i.events.iter().any(|e| matches!(e, egui::Event::Text(s) if s == "q"))
+                    }) {
                         self.show_info = false;
                     }
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::CentralPanel::default()
+                        .frame(
+                            egui::Frame::central_panel(&ctx.style())
+                                .inner_margin(egui::Margin { left: 16.0, right: 8.0, top: 8.0, bottom: 8.0 }),
+                        )
+                        .show(ctx, |ui| {
                         egui::Grid::new("info_grid")
                                 .num_columns(2)
                                 .spacing([16.0, 4.0])
@@ -1317,6 +1327,7 @@ impl eframe::App for App {
                                     row(ui, "c / Ctrl+C", "Copy to clipboard");
                                     row(ui, "s / Ctrl+S", "Save to file");
                                     row(ui, "Ctrl+T", "Toggle toolbars");
+                                    row(ui, "q", "Quit");
                                     row(ui, "Enter", "Configurable (default: copy & exit)");
                                     row(ui, "Escape", "Configurable (default: exit)");
 
