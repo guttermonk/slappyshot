@@ -1304,7 +1304,7 @@ impl eframe::App for App {
                 egui::ViewportId::from_hash_of("info_window"),
                 egui::ViewportBuilder::default()
                     .with_title("Keyboard Shortcuts")
-                    .with_inner_size([420.0, 565.0])
+                    .with_inner_size([420.0, 595.0])
                     .with_resizable(false)
                     .with_minimize_button(false)
                     .with_maximize_button(false),
