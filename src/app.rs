@@ -1271,8 +1271,8 @@ impl eframe::App for App {
                 egui::ViewportId::from_hash_of("info_window"),
                 egui::ViewportBuilder::default()
                     .with_title("Keyboard Shortcuts")
-                    .with_inner_size([400.0, 500.0])
-                    .with_resizable(true)
+                    .with_inner_size([420.0, 530.0])
+                    .with_resizable(false)
                     .with_minimize_button(false)
                     .with_maximize_button(false),
                 |ctx, _class| {
@@ -1280,8 +1280,7 @@ impl eframe::App for App {
                         self.show_info = false;
                     }
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            egui::Grid::new("info_grid")
+                        egui::Grid::new("info_grid")
                                 .num_columns(2)
                                 .spacing([16.0, 4.0])
                                 .striped(true)
@@ -1326,7 +1325,6 @@ impl eframe::App for App {
                                     row(ui, "m (on Marker tool)", "Press again to reset counter to 1");
                                     row(ui, "d (Delete tool)", "Click an annotation to remove it");
                                 });
-                        });
                     });
                 },
             );
