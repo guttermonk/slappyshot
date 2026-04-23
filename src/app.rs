@@ -1312,12 +1312,6 @@ impl eframe::App for App {
                                     row(ui, "Shift + Rect / Ellipse", "Constrain to square / circle");
 
                                     ui.end_row();
-                                    header(ui, "Style");
-                                    row(ui, "1 – 6", "Select palette color");
-                                    row(ui, "7 / 8 / 9", "Small / Medium / Large size");
-                                    row(ui, "f", "Toggle fill");
-
-                                    ui.end_row();
                                     header(ui, "Actions");
                                     row(ui, "z / Ctrl+Z", "Undo");
                                     row(ui, "y / Ctrl+Y", "Redo");
