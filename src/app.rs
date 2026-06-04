@@ -1,6 +1,6 @@
 use egui::{Color32, Pos2, Rect, Rounding, Stroke, Vec2};
 use image::RgbaImage;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::config::{Action, Config, apply_theme};
 use crate::render::{compute_blur_pixels, copy_to_clipboard, render_to_image};
@@ -1194,27 +1194,6 @@ impl eframe::App for App {
                 let r = ui.horizontal(|ui| {
                     ui.add_space(leading);
                     ui.spacing_mut().interact_size.y = 22.0;
-                    let palette = self.config.palette_colors();
-                    for (idx, &(r, g, b, a)) in palette.iter().enumerate() {
-                        let c = Color32::from_rgba_unmultiplied(r, g, b, a);
-                        let selected = self.style.color == Color { r, g, b, a };
-                        let (resp, painter) =
-                            ui.allocate_painter(egui::vec2(22.0, 22.0), egui::Sense::click());
-                        painter.rect_filled(resp.rect, Rounding::same(3.0), c);
-                        if selected {
-                            painter.rect_stroke(
-                                resp.rect.shrink(2.0),
-                                Rounding::same(1.0),
-                                Stroke::new(2.0, Color32::WHITE),
-                            );
-                        }
-                        let key = (b'1' + idx as u8) as char;
-                        let resp = resp.on_hover_text(format!("Color {} ({})", idx + 1, key));
-                        if resp.clicked() {
-                            self.style.color = Color { r, g, b, a };
-                        }
-                    }
-                    ui.separator();
                     for (size, label, key) in &[
                         (Size::Small, "S", '7'),
                         (Size::Medium, "M", '8'),
@@ -1234,6 +1213,33 @@ impl eframe::App for App {
                     ui.separator();
                     ui.toggle_value(&mut self.style.fill, "Fill")
                         .on_hover_text("Fill (f)");
+                    ui.separator();
+                    let palette = self.config.palette_colors();
+                    for (idx, &(r, g, b, a)) in palette.iter().enumerate() {
+                        let c = Color32::from_rgba_unmultiplied(r, g, b, a);
+                        let selected = self.style.color == Color { r, g, b, a };
+                        let (resp, painter) =
+                            ui.allocate_painter(egui::vec2(22.0, 22.0), egui::Sense::click());
+                        painter.rect_filled(resp.rect, Rounding::same(3.0), c);
+                        if selected {
+                            painter.rect_stroke(
+                                resp.rect.shrink(2.0),
+                                Rounding::same(1.0),
+                                Stroke::new(2.0, Color32::WHITE),
+                            );
+                        }
+                        // Only the first 6 palette slots have number-key shortcuts ('1'..='6');
+                        // '7'..='9' are reserved for the S/M/L size selectors.
+                        let resp = if idx < 6 {
+                            let key = (b'1' + idx as u8) as char;
+                            resp.on_hover_text(format!("Color {} ({})", idx + 1, key))
+                        } else {
+                            resp.on_hover_text(format!("Color {}", idx + 1))
+                        };
+                        if resp.clicked() {
+                            self.style.color = Color { r, g, b, a };
+                        }
+                    }
                     ui.separator();
                     let zoom_factor = self.config.general.zoom_factor;
                     if ui
@@ -1506,6 +1512,13 @@ impl eframe::App for App {
         if self.config.general.auto_copy && self.annotations.is_empty() {
             // don't auto-copy on empty - it will be triggered after annotation
         }
+
+        // Keep the event loop ticking when unfocused/occluded so winit continues
+        // to service the Wayland queue and reply to xdg_wm_base pings; otherwise
+        // compositors with ANR detection (e.g. Hyprland) pop an "Application Not
+        // Responding" dialog after a few missed pongs. 250ms is well under the
+        // typical ping interval and keeps idle CPU negligible.
+        ctx.request_repaint_after(Duration::from_millis(250));
     }
 }
 
