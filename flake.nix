@@ -76,6 +76,14 @@
         # Use nixpkgs mesa (llvmpipe software rasterizer) — self-contained,
         # no system GPU driver dependency, no wayland version mismatches.
         postInstall = ''
+          # Icon and desktop entry — the notification daemon resolves
+          # .icon("slappyshot") via the hicolor icon theme, and the .desktop
+          # lets compositors map StartupWMClass=slappyshot to this app.
+          install -Dm644 assets/slappyshot.png \
+            $out/share/icons/hicolor/256x256/apps/slappyshot.png
+          install -Dm644 slappyshot.desktop \
+            $out/share/applications/slappyshot.desktop
+
           wrapProgram $out/bin/slappyshot \
             --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath (runtimeLibs pkgs)} \
             --set LIBGL_ALWAYS_SOFTWARE 1 \

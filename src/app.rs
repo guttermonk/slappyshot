@@ -213,7 +213,7 @@ impl App {
                 let _ = notify_rust::Notification::new()
                     .summary("slappyshot")
                     .body("Copied to clipboard")
-                    .icon("satty")
+                    .icon("slappyshot")
                     .show();
             }
             Err(e) => {
@@ -245,7 +245,7 @@ impl App {
                 let _ = notify_rust::Notification::new()
                     .summary("slappyshot")
                     .body(&format!("Saved: {}", filename))
-                    .icon("satty")
+                    .icon("slappyshot")
                     .show();
             }
             Err(e) => {
