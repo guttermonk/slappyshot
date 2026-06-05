@@ -1,6 +1,6 @@
 use egui::{Color32, Pos2, Rect, Rounding, Stroke, Vec2};
 use image::RgbaImage;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::config::{Action, Config, apply_theme};
 use crate::render::{compute_blur_pixels, copy_to_clipboard, render_to_image};
@@ -1512,13 +1512,6 @@ impl eframe::App for App {
         if self.config.general.auto_copy && self.annotations.is_empty() {
             // don't auto-copy on empty - it will be triggered after annotation
         }
-
-        // Keep the event loop ticking when unfocused/occluded so winit continues
-        // to service the Wayland queue and reply to xdg_wm_base pings; otherwise
-        // compositors with ANR detection (e.g. Hyprland) pop an "Application Not
-        // Responding" dialog after a few missed pongs. 250ms is well under the
-        // typical ping interval and keeps idle CPU negligible.
-        ctx.request_repaint_after(Duration::from_millis(250));
     }
 }
 

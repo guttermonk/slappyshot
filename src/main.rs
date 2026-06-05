@@ -154,6 +154,22 @@ fn main() -> anyhow::Result<()> {
                 .unwrap()
                 .push("nerd_symbols".to_owned());
             cc.egui_ctx.set_fonts(fonts);
+
+            // Wake the event loop from outside so winit keeps servicing the
+            // Wayland queue (and replying to xdg_wm_base pings) even when the
+            // surface is occluded — e.g. on another workspace. An in-update
+            // request_repaint_after() is not sufficient on Wayland because a
+            // hidden surface stops receiving frame callbacks, so the loop
+            // never wakes to fire the timer. ctx.request_repaint() from
+            // another thread goes through winit's EventLoopProxy (a calloop
+            // pipe), which is independent of surface visibility. 250ms is
+            // well under typical ANR ping deadlines and costs ~nothing.
+            let wake_ctx = cc.egui_ctx.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                wake_ctx.request_repaint();
+            });
+
             Ok(Box::new(app) as Box<dyn eframe::App>)
         }),
     )
