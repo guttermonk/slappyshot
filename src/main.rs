@@ -127,6 +127,15 @@ fn main() -> anyhow::Result<()> {
 
     let native_options = eframe::NativeOptions {
         viewport,
+        // Disable vsync so eglSwapBuffers doesn't block waiting for a frame
+        // callback. On Wayland, an occluded surface (e.g. on another workspace)
+        // never receives frame callbacks, so a vsync'd swap wedges the app
+        // thread inside swap_buffers — which means the Wayland event queue
+        // never gets dispatched, sctk's auto-pong for xdg_wm_base.ping never
+        // runs, and compositors with ANR detection (Hyprland) raise an
+        // "Application Not Responding" dialog. Slappyshot is a static
+        // annotation UI; vsync brings nothing and tearing is not a concern.
+        vsync: false,
         ..Default::default()
     };
 
