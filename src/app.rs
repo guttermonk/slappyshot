@@ -696,6 +696,34 @@ impl App {
                 self.execute_actions(actions);
             }
 
+            // Arrow-key pan when the Pointer tool is active. View-scroll
+            // convention: right arrow scrolls the view right (content shifts
+            // left), matching browsers / document viewers. OS typematic
+            // repeat drives continuous panning while held.
+            if self.active_tool == ToolType::Pointer {
+                let (pan_left, pan_right, pan_up, pan_down) = ctx.input(|i| {
+                    (
+                        i.key_pressed(egui::Key::ArrowLeft),
+                        i.key_pressed(egui::Key::ArrowRight),
+                        i.key_pressed(egui::Key::ArrowUp),
+                        i.key_pressed(egui::Key::ArrowDown),
+                    )
+                });
+                let step = self.config.general.pan_step_size;
+                if pan_left {
+                    self.pan.x += step;
+                }
+                if pan_right {
+                    self.pan.x -= step;
+                }
+                if pan_up {
+                    self.pan.y += step;
+                }
+                if pan_down {
+                    self.pan.y -= step;
+                }
+            }
+
             // Tool shortcuts and zoom shortcuts
             let zoom_factor = self.config.general.zoom_factor;
             for s in &key_events {
@@ -707,16 +735,30 @@ impl App {
                             self.zoom = 1.0;
                             self.pan = Vec2::ZERO;
                         }
-                        '1'..='6' => {
+                        '1'..='8' => {
                             let idx = (c as u8 - b'1') as usize;
                             let palette = self.config.palette_colors();
                             if let Some(&(r, g, b, a)) = palette.get(idx) {
                                 self.style.color = Color { r, g, b, a };
                             }
                         }
-                        '7' => self.style.size = Size::Small,
-                        '8' => self.style.size = Size::Medium,
-                        '9' => self.style.size = Size::Large,
+                        'S' => self.style.size = Size::Small,
+                        'M' => self.style.size = Size::Medium,
+                        'L' => self.style.size = Size::Large,
+                        '[' => {
+                            self.style.size = match self.style.size {
+                                Size::Small => Size::Large,
+                                Size::Medium => Size::Small,
+                                Size::Large => Size::Medium,
+                            };
+                        }
+                        ']' => {
+                            self.style.size = match self.style.size {
+                                Size::Small => Size::Medium,
+                                Size::Medium => Size::Large,
+                                Size::Large => Size::Small,
+                            };
+                        }
                         'f' => self.style.fill = !self.style.fill,
                         'c' => self.pending_copy = true,
                         's' => self.pending_save = true,
@@ -1194,17 +1236,17 @@ impl eframe::App for App {
                 let r = ui.horizontal(|ui| {
                     ui.add_space(leading);
                     ui.spacing_mut().interact_size.y = 22.0;
-                    for (size, label, key) in &[
-                        (Size::Small, "S", '7'),
-                        (Size::Medium, "M", '8'),
-                        (Size::Large, "L", '9'),
+                    for (size, label) in &[
+                        (Size::Small, "S"),
+                        (Size::Medium, "M"),
+                        (Size::Large, "L"),
                     ] {
                         if ui
                             .add_sized(
                                 [22.0, 22.0],
                                 egui::SelectableLabel::new(self.style.size == *size, *label),
                             )
-                            .on_hover_text(format!("{} ({})", size.label(), key))
+                            .on_hover_text(format!("{} (Shift+{} | [ / ])", size.label(), label))
                             .clicked()
                         {
                             self.style.size = *size;
@@ -1228,9 +1270,9 @@ impl eframe::App for App {
                                 Stroke::new(2.0, Color32::WHITE),
                             );
                         }
-                        // Only the first 6 palette slots have number-key shortcuts ('1'..='6');
-                        // '7'..='9' are reserved for the S/M/L size selectors.
-                        let resp = if idx < 6 {
+                        // Only the first 8 palette slots have number-key shortcuts ('1'..='8');
+                        // any additional custom palette colors are mouse-only.
+                        let resp = if idx < 8 {
                             let key = (b'1' + idx as u8) as char;
                             resp.on_hover_text(format!("Color {} ({})", idx + 1, key))
                         } else {
@@ -1357,6 +1399,7 @@ impl eframe::App for App {
                                     row(ui, "Middle drag", "Pan");
                                     row(ui, "Pointer + drag", "Pan canvas");
                                     row(ui, "Pointer + drag annotation", "Move annotation");
+                                    row(ui, "Arrow keys (Pointer tool)", "Pan canvas");
 
                                     ui.end_row();
                                     header(ui, "Tool Modifiers");
@@ -1366,6 +1409,13 @@ impl eframe::App for App {
                                         "Shift + Rect / Ellipse",
                                         "Constrain to square / circle",
                                     );
+
+                                    ui.end_row();
+                                    header(ui, "Style");
+                                    row(ui, "1 – 8", "Pick palette color");
+                                    row(ui, "Shift+S / M / L", "Set size Small / Medium / Large");
+                                    row(ui, "[ / ]", "Cycle size smaller / bigger (wraps)");
+                                    row(ui, "f", "Toggle fill");
 
                                     ui.end_row();
                                     header(ui, "Actions");
