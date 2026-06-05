@@ -51,6 +51,17 @@ struct Args {
     auto_copy: bool,
 }
 
+fn load_icon() -> Option<std::sync::Arc<egui::IconData>> {
+    let bytes = include_bytes!("../assets/slappyshot.png");
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let (width, height) = img.dimensions();
+    Some(std::sync::Arc::new(egui::IconData {
+        rgba: img.into_raw(),
+        width,
+        height,
+    }))
+}
+
 fn load_image(filename: Option<&str>) -> anyhow::Result<image::RgbaImage> {
     match filename {
         None | Some("-") => {
@@ -101,14 +112,21 @@ fn main() -> anyhow::Result<()> {
     let img_w = image.width() as f32;
     let img_h = image.height() as f32;
 
+    let icon = load_icon();
+
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("slappyshot")
+        .with_app_id("slappyshot")
+        .with_inner_size([img_w.max(400.0), img_h.max(300.0) + 80.0])
+        .with_min_inner_size([400.0, 300.0])
+        .with_fullscreen(config.general.fullscreen)
+        .with_decorations(!config.general.no_window_decoration);
+    if let Some(icon) = icon {
+        viewport = viewport.with_icon(icon);
+    }
+
     let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("slappyshot")
-            .with_app_id("slappyshot")
-            .with_inner_size([img_w.max(400.0), img_h.max(300.0) + 80.0])
-            .with_min_inner_size([400.0, 300.0])
-            .with_fullscreen(config.general.fullscreen)
-            .with_decorations(!config.general.no_window_decoration),
+        viewport,
         ..Default::default()
     };
 
