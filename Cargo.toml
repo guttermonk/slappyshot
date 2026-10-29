@@ -20,7 +20,7 @@ xdg       = "3"
 anyhow    = "1"
 hex_color = { version = "3", features = ["serde"] }
 ab_glyph  = "0.2"
-imageproc = "0.25"
+imageproc = "0.27"
 arboard   = "3"
 notify-rust = "4"
 notosans  = "0.1"
