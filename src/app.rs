@@ -33,6 +33,22 @@ const INITIAL_SIZE_MAX_ATTEMPTS: u32 = 60;
 /// reports one.
 const INITIAL_SIZE_SCALE_GRACE: u32 = 20;
 
+/// How much of the monitor a window may take before it is in the way.
+///
+/// A window clamped to the monitor exactly is still too big, because a panel
+/// takes a bite out of the screen that the window knows nothing about: Wayland
+/// hands a client the MONITOR size and never the work area. A full-screen
+/// capture therefore opened a full-screen-tall window, which the compositor
+/// centred in the usable area, leaving the toolbars tucked under the bar --
+/// toolbars being at the top, that is the half that hurts.
+///
+/// This is a heuristic and not a measurement, which is the honest way to say
+/// it. 5% is 43 points of the 864 on this display, comfortably clear of the
+/// 30-point bar measured here, and small enough to be invisible on a screen
+/// with no panel at all. The compositor remains the only thing that knows the
+/// real answer; if one ever offers it, this should go.
+const MAX_MONITOR_FRACTION: f32 = 0.95;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PointerDrag {
     None,
@@ -76,6 +92,9 @@ pub struct App {
     /// apply_initial_window_size. Dropped once the size lands, so the window
     /// stays freely resizable afterwards.
     forced_min: Option<Vec2>,
+    /// The last minimum actually sent, so an unchanged one is not re-sent on
+    /// every frame. See send_min_inner_size.
+    last_min_sent: Option<Vec2>,
     pointer_drag: PointerDrag,
     key_flash: Option<(ToolType, Instant)>,
     show_info: bool,
@@ -132,6 +151,7 @@ impl App {
             initial_size_request: None,
             initial_size_attempts: 0,
             forced_min: None,
+            last_min_sent: None,
             pointer_drag: PointerDrag::None,
             key_flash: None,
             show_info: false,
@@ -227,6 +247,20 @@ impl App {
         self.active_tool = tool;
     }
 
+    /// Set the window's minimum size, but only when it has actually changed.
+    ///
+    /// This used to go out on every frame, which is harmless right up until
+    /// the compositor is in the middle of something: a constraint re-asserted
+    /// every frame while the window is being dragged reads as the window
+    /// fighting the drag, and it flickered.
+    fn send_min_inner_size(&mut self, ctx: &egui::Context, min: Vec2) {
+        if self.last_min_sent == Some(min) {
+            return;
+        }
+        self.last_min_sent = Some(min);
+        ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min));
+    }
+
     /// Size the window to the image, once, on the first frame that knows the
     /// display scale.
     ///
@@ -245,11 +279,15 @@ impl App {
     /// not shrunk to fit -- zoom stays 1:1 and the existing pan (drag, or the
     /// arrow keys with the pointer tool) reaches the rest of it.
     ///
-    /// Clamped to the whole monitor rather than a work area minus some
-    /// allowance for a bar, because Wayland tells a client the former and not
-    /// the latter. Inventing a margin here would be guessing at a panel this
-    /// program cannot see; the compositor places floating windows and does
-    /// know.
+    /// Clamped to MAX_MONITOR_FRACTION of the monitor rather than to the
+    /// monitor itself. Clamping to the whole thing was tried first, on the
+    /// argument that only the compositor knows where the panels are and it is
+    /// the one placing the window -- and that turned out to be half an
+    /// argument. Hyprland does centre the window in the USABLE area, which it
+    /// can only do if the window fits: a full-screen capture gives a
+    /// full-screen-tall window, 30 points of overflow, and half of that lands
+    /// on the toolbars at the top. See the constant for why a fraction is the
+    /// honest shape of the fix.
     ///
     /// Asked for repeatedly, and that is the part that took a measurement to
     /// learn. A single request sent on the first frame is simply lost: the
@@ -309,16 +347,28 @@ impl App {
             // Still None after the grace period: a window of the right size
             // unclamped beats a correctly clamped one that never arrives.
             if let Some(monitor) = monitor {
-                size = size.min(monitor);
+                size = size.min(monitor * MAX_MONITOR_FRACTION);
             }
 
             size.max(egui::vec2(MIN_WINDOW_W_POINTS, MIN_WINDOW_H_POINTS))
         });
 
-        // Close enough: a compositor is free to round, and chasing a fraction
-        // of a point would mean never stopping.
+        // Done when the window is at least the wanted size, NOT when it equals
+        // it. The mechanism is a floor, so "big enough" is the whole of what it
+        // can achieve, and a window can legitimately be wider than asked --
+        // the toolbars have a minimum width of their own and it is routinely
+        // larger than a small capture.
+        //
+        // Testing for equality instead left every small capture spinning out
+        // all 60 attempts against a width it was never going to get, and then
+        // holding the floor below for the life of the window, which turned
+        // into a resize fight with the compositor whenever the window was
+        // dragged.
+        //
+        // The 1.0 of slack is for a compositor's rounding, not for the window
+        // being a bit small: a point under is still under.
         let have = ctx.screen_rect().size();
-        if (have.x - want.x).abs() <= 1.0 && (have.y - want.y).abs() <= 1.0 {
+        if have.x + 1.0 >= want.x && have.y + 1.0 >= want.y {
             self.initial_size_attempts = INITIAL_SIZE_MAX_ATTEMPTS;
             // Let go of the floor now that the size has landed, so the window
             // can still be made smaller by hand afterwards.
@@ -327,6 +377,14 @@ impl App {
         }
 
         self.initial_size_attempts += 1;
+        if self.initial_size_attempts >= INITIAL_SIZE_MAX_ATTEMPTS {
+            // Out of attempts. Drop the floor rather than leaving it standing:
+            // a size that could not be reached in a second is not going to be
+            // reached by holding a constraint over the window forever, and the
+            // constraint is what the user would feel.
+            self.forced_min = None;
+            return;
+        }
         // The floor, not the size request, is what actually moves this window.
         //
         // ViewportCommand::InnerSize is ignored here -- measured, 60 requests
@@ -340,7 +398,7 @@ impl App {
         // only ever grow the window this way, which is the direction that
         // matters: the stuck size is a clamp the window is too SMALL for.
         self.forced_min = Some(want);
-        ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(want));
+        self.send_min_inner_size(ctx, want);
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(want));
         // egui only redraws on demand, and nothing else here guarantees
         // another frame -- without this the retry would wait for the user to
@@ -1500,7 +1558,7 @@ impl eframe::App for App {
             if let Some(forced) = self.forced_min {
                 min = min.max(forced);
             }
-            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min));
+            self.send_min_inner_size(ctx, min);
             if !self.toolbar_min_width_applied {
                 self.toolbar_min_width_applied = true;
                 // Measured against the size apply_initial_window_size ASKED
