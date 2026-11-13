@@ -3,12 +3,15 @@ use egui::{Pos2, Vec2};
 use std::sync::Arc;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolType {
     Pointer,
     Crop,
     Line,
+    #[default]
     Arrow,
     Rectangle,
     Ellipse,
@@ -71,13 +74,6 @@ impl ToolType {
             ToolType::Delete => "\u{F014}",
         }
     }
-
-}
-
-impl Default for ToolType {
-    fn default() -> Self {
-        ToolType::Arrow
-    }
 }
 
 pub fn tool_from_string(s: &str) -> Option<ToolType> {
@@ -98,17 +94,12 @@ pub fn tool_from_string(s: &str) -> Option<ToolType> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HighlighterKind {
+    #[default]
     Block,
     Freehand,
-}
-
-impl Default for HighlighterKind {
-    fn default() -> Self {
-        HighlighterKind::Block
-    }
 }
 
 #[derive(Debug, Clone)]

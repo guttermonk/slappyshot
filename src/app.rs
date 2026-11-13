@@ -1,4 +1,4 @@
-use egui::{Color32, Pos2, Rect, CornerRadius, Stroke, Vec2};
+use egui::{Color32, CornerRadius, Pos2, Rect, Stroke, Vec2};
 use image::RgbaImage;
 use std::time::Instant;
 
@@ -308,12 +308,11 @@ impl App {
             min = min.max(forced);
         }
 
-        if let Some(last) = self.last_min_sent {
-            if (last.x - min.x).abs() < MIN_SIZE_EPSILON
-                && (last.y - min.y).abs() < MIN_SIZE_EPSILON
-            {
-                return;
-            }
+        if let Some(last) = self.last_min_sent
+            && (last.x - min.x).abs() < MIN_SIZE_EPSILON
+            && (last.y - min.y).abs() < MIN_SIZE_EPSILON
+        {
+            return;
         }
         self.last_min_sent = Some(min);
         ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min));
@@ -363,14 +362,17 @@ impl App {
     /// every frame for as long as the window is open, including after the
     /// user has resized it by hand.
     fn apply_initial_window_size(&mut self, ctx: &egui::Context) {
-        if self.initial_size_attempts >= INITIAL_SIZE_MAX_ATTEMPTS
-            || self.config.general.fullscreen
+        if self.initial_size_attempts >= INITIAL_SIZE_MAX_ATTEMPTS || self.config.general.fullscreen
         {
             return;
         }
 
         let ppp = ctx.pixels_per_point();
-        if !(ppp > 0.0) {
+        // Spelled out rather than `!(ppp > 0.0)`, which was the same test
+        // wearing a disguise clippy objects to: both reject a NaN, and that
+        // is the point of it. Dividing the image size by a NaN would poison
+        // every number downstream of here.
+        if !ppp.is_finite() || ppp <= 0.0 {
             return; // Not known yet. Try again next frame.
         }
 
@@ -729,12 +731,11 @@ impl App {
         }
 
         // Also update crop
-        if self.active_tool == ToolType::Crop {
-            if let Some(ref mut crop) = self.crop_state.rect {
-                if crop.active {
-                    crop.size = raw_end - crop.pos;
-                }
-            }
+        if self.active_tool == ToolType::Crop
+            && let Some(ref mut crop) = self.crop_state.rect
+            && crop.active
+        {
+            crop.size = raw_end - crop.pos;
         }
     }
 
@@ -878,10 +879,10 @@ impl App {
             ActiveDrawing::None | ActiveDrawing::Text { .. } => {}
         }
 
-        if self.active_tool == ToolType::Crop {
-            if let Some(ref mut crop) = self.crop_state.rect {
-                crop.active = false;
-            }
+        if self.active_tool == ToolType::Crop
+            && let Some(ref mut crop) = self.crop_state.rect
+        {
+            crop.active = false;
         }
     }
 
@@ -1047,11 +1048,11 @@ impl App {
                         'q' => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
                         _ => {
                             let keybinds = self.config.keybind_map();
-                            if let Some(tool_name) = keybinds.get(&c) {
-                                if let Some(tool) = tool_from_string(tool_name) {
-                                    self.switch_tool(tool);
-                                    self.key_flash = Some((tool, Instant::now()));
-                                }
+                            if let Some(tool_name) = keybinds.get(&c)
+                                && let Some(tool) = tool_from_string(tool_name)
+                            {
+                                self.switch_tool(tool);
+                                self.key_flash = Some((tool, Instant::now()));
                             }
                         }
                     }
@@ -1097,7 +1098,11 @@ impl App {
                     let s = i2s(*top_left);
                     let e = i2s(*top_left + *size);
                     let r = Rect::from_two_pos(s, e);
-                    let rounding = CornerRadius::same((self.config.general.corner_roundness * zoom).round().clamp(0.0, 255.0) as u8);
+                    let rounding = CornerRadius::same(
+                        (self.config.general.corner_roundness * zoom)
+                            .round()
+                            .clamp(0.0, 255.0) as u8,
+                    );
                     if self.style.fill {
                         painter.rect_filled(r, rounding, color);
                     } else {
@@ -1120,7 +1125,7 @@ impl App {
                                 .iter()
                                 .map(|&delta| Pos2::new(start.x + delta.x, start.y + delta.y)),
                         )
-                        .map(|p| i2s(p))
+                        .map(&i2s)
                         .collect();
                     painter.add(egui::Shape::line(screen_points, stroke));
                 }
@@ -1130,7 +1135,12 @@ impl App {
                     let s = i2s(*top_left);
                     let e = i2s(*top_left + *size);
                     let r = Rect::from_two_pos(s, e);
-                    painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0_f32, Color32::WHITE), egui::StrokeKind::Inside);
+                    painter.rect_stroke(
+                        r,
+                        CornerRadius::ZERO,
+                        Stroke::new(1.0_f32, Color32::WHITE),
+                        egui::StrokeKind::Inside,
+                    );
                 }
             }
             ActiveDrawing::Highlight {
@@ -1163,7 +1173,7 @@ impl App {
                                     .chain(points.iter().map(|&delta| {
                                         Pos2::new(start.x + delta.x, start.y + delta.y)
                                     }))
-                                    .map(|p| i2s(p))
+                                    .map(i2s)
                                     .collect();
                             painter.add(egui::Shape::line(screen_points, hi_stroke));
                         }
@@ -1223,7 +1233,12 @@ impl App {
             }
 
             // Border
-            painter.rect_stroke(crop_rect, CornerRadius::ZERO, Stroke::new(2.0_f32, Color32::WHITE), egui::StrokeKind::Inside);
+            painter.rect_stroke(
+                crop_rect,
+                CornerRadius::ZERO,
+                Stroke::new(2.0_f32, Color32::WHITE),
+                egui::StrokeKind::Inside,
+            );
 
             // Confirm instruction
             painter.text(
@@ -1264,26 +1279,25 @@ impl App {
 
         if self.active_tool == ToolType::Pointer {
             // Pointer tool: pan canvas or move annotation with primary drag
-            if response.drag_started_by(egui::PointerButton::Primary) {
-                if let Some(origin) = ctx.input(|i| i.pointer.press_origin()) {
-                    if self.is_inside_image(origin) {
-                        let img_pos = self.screen_to_image(origin);
-                        let threshold = 8.0 / self.zoom;
-                        let hit_idx = self
-                            .annotations
-                            .iter()
-                            .enumerate()
-                            .rev()
-                            .find(|(_, ann)| annotation_hit_test(ann, img_pos, threshold))
-                            .map(|(idx, _)| idx);
-                        if let Some(idx) = hit_idx {
-                            self.undo_stack.push(self.annotations.clone());
-                            self.redo_stack.clear();
-                            self.pointer_drag = PointerDrag::MovingAnnotation(idx);
-                        } else {
-                            self.pointer_drag = PointerDrag::Panning;
-                        }
-                    }
+            if response.drag_started_by(egui::PointerButton::Primary)
+                && let Some(origin) = ctx.input(|i| i.pointer.press_origin())
+                && self.is_inside_image(origin)
+            {
+                let img_pos = self.screen_to_image(origin);
+                let threshold = 8.0 / self.zoom;
+                let hit_idx = self
+                    .annotations
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(_, ann)| annotation_hit_test(ann, img_pos, threshold))
+                    .map(|(idx, _)| idx);
+                if let Some(idx) = hit_idx {
+                    self.undo_stack.push(self.annotations.clone());
+                    self.redo_stack.clear();
+                    self.pointer_drag = PointerDrag::MovingAnnotation(idx);
+                } else {
+                    self.pointer_drag = PointerDrag::Panning;
                 }
             }
             if response.dragged_by(egui::PointerButton::Primary) {
@@ -1305,50 +1319,45 @@ impl App {
             }
         } else {
             // Primary button drag start
-            if response.drag_started_by(egui::PointerButton::Primary) {
-                if let Some(origin) = ctx.input(|i| i.pointer.press_origin()) {
-                    if self.is_inside_image(origin) {
-                        let img_pos = self.clamp_to_image(self.screen_to_image(origin));
-                        self.drag_start = Some(img_pos);
-                        self.on_drag_begin(img_pos, modifiers);
-                    }
-                }
+            if response.drag_started_by(egui::PointerButton::Primary)
+                && let Some(origin) = ctx.input(|i| i.pointer.press_origin())
+                && self.is_inside_image(origin)
+            {
+                let img_pos = self.clamp_to_image(self.screen_to_image(origin));
+                self.drag_start = Some(img_pos);
+                self.on_drag_begin(img_pos, modifiers);
             }
 
             // Primary drag update
-            if response.dragged_by(egui::PointerButton::Primary) {
-                if let (Some(start), Some(hover)) =
+            if response.dragged_by(egui::PointerButton::Primary)
+                && let (Some(start), Some(hover)) =
                     (self.drag_start, ctx.input(|i| i.pointer.hover_pos()))
-                {
-                    let current = self.clamp_to_image(self.screen_to_image(hover));
-                    let delta_vec = current.to_vec2() - start.to_vec2();
-                    let delta_pos = Pos2::new(delta_vec.x, delta_vec.y);
-                    self.on_drag_update(start, delta_pos, modifiers);
-                }
+            {
+                let current = self.clamp_to_image(self.screen_to_image(hover));
+                let delta_vec = current.to_vec2() - start.to_vec2();
+                let delta_pos = Pos2::new(delta_vec.x, delta_vec.y);
+                self.on_drag_update(start, delta_pos, modifiers);
             }
 
             // Primary drag end
             let drag_released = response.drag_stopped_by(egui::PointerButton::Primary);
-            if drag_released {
-                if let Some(start) = self.drag_start.take() {
-                    let hover = ctx
-                        .input(|i| i.pointer.hover_pos())
-                        .map(|p| self.clamp_to_image(self.screen_to_image(p)))
-                        .unwrap_or(start);
-                    let delta_vec = hover.to_vec2() - start.to_vec2();
-                    let delta_pos = Pos2::new(delta_vec.x, delta_vec.y);
-                    self.on_drag_end(start, delta_pos, modifiers);
-                }
+            if drag_released && let Some(start) = self.drag_start.take() {
+                let hover = ctx
+                    .input(|i| i.pointer.hover_pos())
+                    .map(|p| self.clamp_to_image(self.screen_to_image(p)))
+                    .unwrap_or(start);
+                let delta_vec = hover.to_vec2() - start.to_vec2();
+                let delta_pos = Pos2::new(delta_vec.x, delta_vec.y);
+                self.on_drag_end(start, delta_pos, modifiers);
             }
 
             // Click (single press-release without drag)
-            if response.clicked_by(egui::PointerButton::Primary) {
-                if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                    if self.is_inside_image(pos) {
-                        let img_pos = self.clamp_to_image(self.screen_to_image(pos));
-                        self.on_click(img_pos, modifiers);
-                    }
-                }
+            if response.clicked_by(egui::PointerButton::Primary)
+                && let Some(pos) = ctx.input(|i| i.pointer.interact_pos())
+                && self.is_inside_image(pos)
+            {
+                let img_pos = self.clamp_to_image(self.screen_to_image(pos));
+                self.on_click(img_pos, modifiers);
             }
         }
 
@@ -1442,16 +1451,17 @@ impl eframe::App for App {
                             )
                             .on_hover_text(tooltip);
                         // Draw a momentary white border when activated by keyboard
-                        if let Some((flash_tool, flash_time)) = self.key_flash {
-                            if flash_tool == tool && flash_time.elapsed().as_millis() < 150 {
-                                ui.painter().rect_stroke(
-                                    resp.rect,
-                                    CornerRadius::same(2),
-                                    Stroke::new(2.0_f32, Color32::WHITE),
-                                    egui::StrokeKind::Inside,
-                                );
-                                ui.ctx().request_repaint();
-                            }
+                        if let Some((flash_tool, flash_time)) = self.key_flash
+                            && flash_tool == tool
+                            && flash_time.elapsed().as_millis() < 150
+                        {
+                            ui.painter().rect_stroke(
+                                resp.rect,
+                                CornerRadius::same(2),
+                                Stroke::new(2.0_f32, Color32::WHITE),
+                                egui::StrokeKind::Inside,
+                            );
+                            ui.ctx().request_repaint();
                         }
                         if resp.clicked() {
                             self.switch_tool(tool);
@@ -1519,11 +1529,9 @@ impl eframe::App for App {
                 let r = ui.horizontal(|ui| {
                     ui.add_space(leading);
                     ui.spacing_mut().interact_size.y = 22.0;
-                    for (size, label) in &[
-                        (Size::Small, "S"),
-                        (Size::Medium, "M"),
-                        (Size::Large, "L"),
-                    ] {
+                    for (size, label) in
+                        &[(Size::Small, "S"), (Size::Medium, "M"), (Size::Large, "L")]
+                    {
                         if ui
                             .add_sized(
                                 [22.0, 22.0],
@@ -1615,28 +1623,26 @@ impl eframe::App for App {
             .top_toolbar_content_width
             .max(self.bottom_toolbar_content_width)
             + TOOLBAR_MIN_WIDTH_PADDING;
-        if min_toolbar_w < 9999.0 {
-            if !self.toolbar_min_width_applied {
-                self.toolbar_min_width_applied = true;
-                // Measured against the size apply_initial_window_size ASKED
-                // for, not against screen_rect, whenever a request is
-                // outstanding. Both run in the same frame and this one runs
-                // second, but a viewport command does not land until the next
-                // frame -- so screen_rect here still reports the provisional
-                // size from main.rs. Widening a window on the strength of a
-                // measurement that is about to be replaced gets the decision
-                // backwards: a small capture correctly sized down to the 400pt
-                // minimum would be judged "wide enough" against the stale
-                // value and never widened for the toolbar.
-                let current = self
-                    .initial_size_request
-                    .unwrap_or_else(|| ctx.screen_rect().size());
-                if current.x < min_toolbar_w {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
-                        min_toolbar_w,
-                        current.y,
-                    )));
-                }
+        if min_toolbar_w < 9999.0 && !self.toolbar_min_width_applied {
+            self.toolbar_min_width_applied = true;
+            // Measured against the size apply_initial_window_size ASKED
+            // for, not against screen_rect, whenever a request is
+            // outstanding. Both run in the same frame and this one runs
+            // second, but a viewport command does not land until the next
+            // frame -- so screen_rect here still reports the provisional
+            // size from main.rs. Widening a window on the strength of a
+            // measurement that is about to be replaced gets the decision
+            // backwards: a small capture correctly sized down to the 400pt
+            // minimum would be judged "wide enough" against the stale
+            // value and never widened for the toolbar.
+            let current = self
+                .initial_size_request
+                .unwrap_or_else(|| ctx.screen_rect().size());
+            if current.x < min_toolbar_w {
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                    min_toolbar_w,
+                    current.y,
+                )));
             }
         }
 
@@ -1892,13 +1898,19 @@ fn draw_one_annotation(
             let s = i2s(*top_left);
             let e = i2s(*top_left + *size);
             let r = Rect::from_two_pos(s, e);
-            let rounding = CornerRadius::same((*corner_roundness * zoom).round().clamp(0.0, 255.0) as u8);
+            let rounding =
+                CornerRadius::same((*corner_roundness * zoom).round().clamp(0.0, 255.0) as u8);
             let lw = style.size.to_line_width(factor) * zoom;
             let color = style.color.to_egui();
             if style.fill {
                 painter.rect_filled(r, rounding, color);
             } else {
-                painter.rect_stroke(r, rounding, Stroke::new(lw, color), egui::StrokeKind::Inside);
+                painter.rect_stroke(
+                    r,
+                    rounding,
+                    Stroke::new(lw, color),
+                    egui::StrokeKind::Inside,
+                );
             }
         }
         Annotation::Ellipse {
@@ -1926,7 +1938,7 @@ fn draw_one_annotation(
                             .iter()
                             .map(|&delta| Pos2::new(start.x + delta.x, start.y + delta.y)),
                     )
-                    .map(|p| i2s(p))
+                    .map(i2s)
                     .collect();
                 painter.add(egui::Shape::line(screen_points, Stroke::new(lw, color)));
             }
@@ -2022,7 +2034,7 @@ fn draw_one_annotation(
                                     .iter()
                                     .map(|&delta| Pos2::new(start.x + delta.x, start.y + delta.y)),
                             )
-                            .map(|p| i2s(p))
+                            .map(i2s)
                             .collect();
                         painter.add(egui::Shape::line(screen_points, Stroke::new(hw, hi_color)));
                     }

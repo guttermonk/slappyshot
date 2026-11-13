@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use egui::Color32;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -171,15 +171,10 @@ impl Config {
             std::path::PathBuf::from(p)
         } else {
             let xdg_dirs = xdg::BaseDirectories::with_prefix("slappyshot");
-            xdg_dirs
-                .find_config_file("config.toml")
-                .unwrap_or_else(|| {
-                    let home = std::env::var("HOME").unwrap_or_default();
-                    std::path::PathBuf::from(format!(
-                        "{}/.config/slappyshot/config.toml",
-                        home
-                    ))
-                })
+            xdg_dirs.find_config_file("config.toml").unwrap_or_else(|| {
+                let home = std::env::var("HOME").unwrap_or_default();
+                std::path::PathBuf::from(format!("{}/.config/slappyshot/config.toml", home))
+            })
         };
 
         if path.exists() {
@@ -347,29 +342,29 @@ pub fn parse_hex_color(s: &str) -> Option<Color32> {
 pub fn apply_theme(ctx: &egui::Context, theme: &ThemeConfig) {
     let mut visuals = egui::Visuals::dark();
 
-    if let Some(ref hex) = theme.panel_fill {
-        if let Some(color) = parse_hex_color(hex) {
-            visuals.panel_fill = color;
-            visuals.window_fill = color;
-        }
+    if let Some(ref hex) = theme.panel_fill
+        && let Some(color) = parse_hex_color(hex)
+    {
+        visuals.panel_fill = color;
+        visuals.window_fill = color;
     }
-    if let Some(ref hex) = theme.text_color {
-        if let Some(color) = parse_hex_color(hex) {
-            visuals.override_text_color = Some(color);
-        }
+    if let Some(ref hex) = theme.text_color
+        && let Some(color) = parse_hex_color(hex)
+    {
+        visuals.override_text_color = Some(color);
     }
-    if let Some(ref hex) = theme.button_fill {
-        if let Some(color) = parse_hex_color(hex) {
-            visuals.widgets.inactive.weak_bg_fill = color;
-            visuals.widgets.inactive.bg_fill = color;
-        }
+    if let Some(ref hex) = theme.button_fill
+        && let Some(color) = parse_hex_color(hex)
+    {
+        visuals.widgets.inactive.weak_bg_fill = color;
+        visuals.widgets.inactive.bg_fill = color;
     }
-    if let Some(ref hex) = theme.button_active {
-        if let Some(color) = parse_hex_color(hex) {
-            visuals.widgets.active.bg_fill = color;
-            visuals.widgets.active.weak_bg_fill = color;
-            visuals.selection.bg_fill = color;
-        }
+    if let Some(ref hex) = theme.button_active
+        && let Some(color) = parse_hex_color(hex)
+    {
+        visuals.widgets.active.bg_fill = color;
+        visuals.widgets.active.weak_bg_fill = color;
+        visuals.selection.bg_fill = color;
     }
 
     ctx.set_visuals(visuals);

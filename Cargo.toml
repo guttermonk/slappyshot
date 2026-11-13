@@ -18,7 +18,6 @@ toml      = "1"
 chrono    = "0.4"
 xdg       = "3"
 anyhow    = "1"
-hex_color = { version = "3", features = ["serde"] }
 ab_glyph  = "0.2"
 imageproc = "0.25"
 arboard   = "3"
@@ -27,5 +26,4 @@ notosans  = "0.1"
 
 [build-dependencies]
 clap          = { version = "4", features = ["derive"] }
-clap_complete = "4"
 clap_mangen   = "0.3"

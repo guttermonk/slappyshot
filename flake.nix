@@ -84,6 +84,14 @@
           install -Dm644 slappyshot.desktop \
             $out/share/applications/slappyshot.desktop
 
+          # The manpage build.rs renders from src/cli.rs. Found rather than
+          # named, because it lands in OUT_DIR and that directory name carries
+          # a build hash. Deliberately not guarded with `|| true`: if the page
+          # stops being generated that is a broken build script, and a silent
+          # skip would leave `man slappyshot` quietly empty.
+          install -Dm644 "$(find target -name slappyshot.1 | head -1)" \
+            $out/share/man/man1/slappyshot.1
+
           wrapProgram $out/bin/slappyshot \
             --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath (runtimeLibs pkgs)} \
             --set LIBGL_ALWAYS_SOFTWARE 1 \

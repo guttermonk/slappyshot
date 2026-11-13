@@ -1,4 +1,5 @@
 mod app;
+mod cli;
 mod config;
 mod render;
 mod style;
@@ -9,47 +10,8 @@ use std::io::Read;
 use clap::Parser;
 
 use app::App;
+use cli::Args;
 use config::Config;
-
-#[derive(Parser, Debug)]
-#[command(name = "slappyshot", about = "Screenshot annotation tool")]
-struct Args {
-    /// Input image file ("-" for stdin)
-    #[arg(long, short)]
-    filename: Option<String>,
-
-    /// Output filename template
-    #[arg(long)]
-    output_filename: Option<String>,
-
-    /// Start fullscreen
-    #[arg(long)]
-    fullscreen: bool,
-
-    /// Custom copy command
-    #[arg(long)]
-    copy_command: Option<String>,
-
-    /// Config file path
-    #[arg(long)]
-    config: Option<String>,
-
-    /// Initial tool (arrow, rect, etc.)
-    #[arg(long)]
-    initial_tool: Option<String>,
-
-    /// Annotation size factor
-    #[arg(long)]
-    annotation_size_factor: Option<f32>,
-
-    /// Exit after saving
-    #[arg(long)]
-    early_exit: bool,
-
-    /// Auto-copy after annotation
-    #[arg(long)]
-    auto_copy: bool,
-}
 
 fn load_icon() -> Option<std::sync::Arc<egui::IconData>> {
     let bytes = include_bytes!("../assets/slappyshot.png");
@@ -181,7 +143,8 @@ fn main() -> anyhow::Result<()> {
                 "nerd_symbols".to_owned(),
                 egui::FontData::from_static(include_bytes!(
                     "../assets/SymbolsNerdFont-Regular.ttf"
-                )).into(),
+                ))
+                .into(),
             );
             fonts
                 .families
@@ -205,9 +168,11 @@ fn main() -> anyhow::Result<()> {
             // pipe), which is independent of surface visibility. 250ms is
             // well under typical ANR ping deadlines and costs ~nothing.
             let wake_ctx = cc.egui_ctx.clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                wake_ctx.request_repaint();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    wake_ctx.request_repaint();
+                }
             });
 
             Ok(Box::new(app) as Box<dyn eframe::App>)

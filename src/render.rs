@@ -4,8 +4,8 @@ use std::sync::Arc;
 use ab_glyph::{FontRef, PxScale};
 use image::{Rgba, RgbaImage};
 use imageproc::drawing::{
-    draw_filled_circle_mut, draw_filled_ellipse_mut, draw_filled_rect_mut,
-    draw_hollow_ellipse_mut, draw_hollow_rect_mut, draw_line_segment_mut, draw_text_mut,
+    draw_filled_circle_mut, draw_filled_ellipse_mut, draw_filled_rect_mut, draw_hollow_ellipse_mut,
+    draw_hollow_rect_mut, draw_line_segment_mut, draw_text_mut,
 };
 use imageproc::rect::Rect as IRect;
 
@@ -115,8 +115,7 @@ fn draw_annotation(img: &mut RgbaImage, ann: &Annotation) {
             style,
         } => {
             if let Ok(font) = FontRef::try_from_slice(FONT_BYTES) {
-                let font_size =
-                    style.size.to_text_size(style.annotation_size_factor) as f32;
+                let font_size = style.size.to_text_size(style.annotation_size_factor) as f32;
                 let scale = PxScale::from(font_size);
                 let color = to_rgba(style.color);
                 let x = pos.x.round() as i32;
@@ -303,7 +302,9 @@ fn draw_arrow_on_image(
 
     let dir_x = dx / len;
     let dir_y = dy / len;
-    let head_len = style.size.to_arrow_head_length(style.annotation_size_factor);
+    let head_len = style
+        .size
+        .to_arrow_head_length(style.annotation_size_factor);
     let half_angle = 60.0f32.to_radians() / 2.0;
 
     // Draw tail line
@@ -406,10 +407,8 @@ pub fn compute_blur_pixels(
     let (tl, sz) = normalize_rect(top_left, size);
     let x = tl.x.round().max(0.0) as u32;
     let y = tl.y.round().max(0.0) as u32;
-    let w = (sz.x.round() as u32)
-        .clamp(1, source.width().saturating_sub(x).max(1));
-    let h = (sz.y.round() as u32)
-        .clamp(1, source.height().saturating_sub(y).max(1));
+    let w = (sz.x.round() as u32).clamp(1, source.width().saturating_sub(x).max(1));
+    let h = (sz.y.round() as u32).clamp(1, source.height().saturating_sub(y).max(1));
     let sub = image::imageops::crop_imm(source, x, y, w, h).to_image();
     let blurred = image::imageops::blur(&sub, sigma);
     (Arc::new(blurred.into_raw()), w, h)
