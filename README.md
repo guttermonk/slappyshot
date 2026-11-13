@@ -1,8 +1,8 @@
 # slappyshot
 
-A fast screenshot annotation tool. Pipe in a screenshot, annotate it, copy or save.
+A fast, toolkit-independent screenshot annotation tool. Pipe in a screenshot, annotate it, copy or save. Built on [egui](https://github.com/emilk/egui)/[eframe](https://github.com/emilk/egui/tree/master/crates/eframe) — no GTK required.
 
-Built on [egui](https://github.com/emilk/egui)/[eframe](https://github.com/emilk/egui/tree/master/crates/eframe) — no GTK required.
+"You miss 100% of the screenshots you don't take using slappyshot." - Wayne Gretzky
 
 ## Usage
 
