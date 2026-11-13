@@ -18,7 +18,21 @@ use crate::tools::{
 /// the image does not then cover part of it.
 pub const TOOLBAR_RESERVE_POINTS: f32 = 80.0;
 /// Small captures still need a window big enough to hold the toolbars.
-pub const MIN_WINDOW_W_POINTS: f32 = 400.0;
+///
+/// The width is load bearing rather than a comfort figure, which is why it is
+/// 700 and not the 400 it used to be. The toolbars measure their own content
+/// once laid out and raise the window's minimum width to fit it -- 648 points
+/// on this machine -- and ANY gap between the size the window was created at
+/// and a minimum imposed afterwards shows up as a resize on every compositor
+/// reconfigure. Measured: created at 400 against a toolbar minimum of 648,
+/// every configure during a drag alternated 400 -> 648 -> 400, which is what
+/// the window flickering under the cursor was.
+///
+/// Starting wider than the toolbars will ever ask for closes that gap before
+/// it can open. 700 against a measured 648 is about 8% of headroom, enough
+/// for a different font or another button. If the toolbars ever genuinely
+/// need more, the flicker returns and this is the number to raise.
+pub const MIN_WINDOW_W_POINTS: f32 = 700.0;
 pub const MIN_WINDOW_H_POINTS: f32 = 300.0;
 
 /// How many frames apply_initial_window_size will keep asking for its size
@@ -48,6 +62,15 @@ const INITIAL_SIZE_SCALE_GRACE: u32 = 20;
 /// with no panel at all. The compositor remains the only thing that knows the
 /// real answer; if one ever offers it, this should go.
 const MAX_MONITOR_FRACTION: f32 = 0.95;
+
+/// Breathing room beside the toolbar buttons when they set the window's
+/// minimum width.
+const TOOLBAR_MIN_WIDTH_PADDING: f32 = 20.0;
+
+/// How far a recomputed minimum size must move before it is worth sending
+/// again. These come from laid-out widgets and carry sub-pixel noise; a whole
+/// point is below anything a person can see and well above the jitter.
+const MIN_SIZE_EPSILON: f32 = 1.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PointerDrag {
@@ -247,15 +270,50 @@ impl App {
         self.active_tool = tool;
     }
 
-    /// Set the window's minimum size, but only when it has actually changed.
+    /// The ONE place that sets the window's minimum size.
     ///
-    /// This used to go out on every frame, which is harmless right up until
-    /// the compositor is in the middle of something: a constraint re-asserted
-    /// every frame while the window is being dragged reads as the window
-    /// fighting the drag, and it flickered.
-    fn send_min_inner_size(&mut self, ctx: &egui::Context, min: Vec2) {
-        if self.last_min_sent == Some(min) {
-            return;
+    /// Two callers used to send this independently -- the sizing code with the
+    /// size it wanted, the toolbar code with the width its buttons need -- and
+    /// they alternated, each seeing the other's value as a change and
+    /// re-sending its own. On the wire that is a window being given two
+    /// different minimums every frame, which is what the flicker was:
+    ///
+    ///   set_min_size(512, 464)   <- sizing
+    ///   set_min_size(648, 464)   <- toolbars
+    ///   set_min_size(512, 464)   <- sizing again, next frame
+    ///   set_min_size(648, 464)
+    ///
+    /// So both constraints are collected here and the larger of each axis
+    /// wins. A minimum is a floor; two floors mean the higher one, not the
+    /// most recently mentioned one.
+    ///
+    /// The epsilon is because these are measured from laid-out widgets and
+    /// carry sub-pixel noise. Comparing floats exactly would let a drift of
+    /// a thousandth of a point re-send the constraint on every frame, which
+    /// is the same failure wearing a smaller number.
+    fn update_min_inner_size(&mut self, ctx: &egui::Context) {
+        let mut min = egui::vec2(MIN_WINDOW_W_POINTS, MIN_WINDOW_H_POINTS);
+
+        // 9999.0 is the "not measured yet" sentinel the toolbar widths start
+        // at; it must not become a minimum.
+        let toolbar_w = self
+            .top_toolbar_content_width
+            .max(self.bottom_toolbar_content_width)
+            + TOOLBAR_MIN_WIDTH_PADDING;
+        if toolbar_w < 9999.0 {
+            min.x = min.x.max(toolbar_w);
+        }
+
+        if let Some(forced) = self.forced_min {
+            min = min.max(forced);
+        }
+
+        if let Some(last) = self.last_min_sent {
+            if (last.x - min.x).abs() < MIN_SIZE_EPSILON
+                && (last.y - min.y).abs() < MIN_SIZE_EPSILON
+            {
+                return;
+            }
         }
         self.last_min_sent = Some(min);
         ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min));
@@ -387,18 +445,24 @@ impl App {
         }
         // The floor, not the size request, is what actually moves this window.
         //
-        // ViewportCommand::InnerSize is ignored here -- measured, 60 requests
-        // over 60 frames with screen_rect never changing by a point, in both
-        // directions. MinInnerSize IS honoured: raising it to the wanted size
-        // grew a stuck 960x540 window to 960x800 immediately. That asymmetry
-        // is also why the window ever reached the toolbar's width: that is a
-        // minimum too, not a resize.
+        // ViewportCommand::InnerSize and MaxInnerSize are both ignored here --
+        // measured, 60 sends over 60 frames with screen_rect never moving.
+        // MinInnerSize is the only one with any effect.
         //
-        // So the size is imposed as a floor and released on arrival. It can
-        // only ever grow the window this way, which is the direction that
-        // matters: the stuck size is a clamp the window is too SMALL for.
+        // Its effect is not purely "grow", which is worth stating because the
+        // obvious model says it should be. With the window sitting at the
+        // monitor clamp, a floor BELOW the current size brings it down to
+        // match: a full-screen capture measures 1536x864 with
+        // MAX_MONITOR_FRACTION at 1.0 and 1459x821 at 0.95. That is the case
+        // this still earns its keep for, now that main.rs asks for the size it
+        // actually wants -- a capture as large as the screen is the one that
+        // cannot be requested small enough up front.
+        //
+        // Recorded rather than sent. update_min_inner_size owns the actual
+        // command and runs later in the frame, so this and the toolbar's
+        // width reach the compositor as one combined floor instead of two
+        // competing ones.
         self.forced_min = Some(want);
-        self.send_min_inner_size(ctx, want);
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(want));
         // egui only redraws on demand, and nothing else here guarantees
         // another frame -- without this the retry would wait for the user to
@@ -1543,22 +1607,15 @@ impl eframe::App for App {
                 self.bottom_toolbar_content_width = r.response.rect.width() - leading;
             });
 
-        // Enforce minimum window width to fit the toolbar
+        // The window's minimum, from every constraint at once. Must run after
+        // the toolbars have laid out, since it reads their measured widths.
+        self.update_min_inner_size(ctx);
+
         let min_toolbar_w = self
             .top_toolbar_content_width
             .max(self.bottom_toolbar_content_width)
-            + 20.0;
+            + TOOLBAR_MIN_WIDTH_PADDING;
         if min_toolbar_w < 9999.0 {
-            // Both minimums at once while the window is being sized. This runs
-            // every frame and apply_initial_window_size runs earlier in the
-            // same one, so sending the toolbar's floor alone would overwrite
-            // the sizing floor before it could take effect -- last command
-            // wins, and this is the later command.
-            let mut min = egui::vec2(min_toolbar_w, MIN_WINDOW_H_POINTS);
-            if let Some(forced) = self.forced_min {
-                min = min.max(forced);
-            }
-            self.send_min_inner_size(ctx, min);
             if !self.toolbar_min_width_applied {
                 self.toolbar_min_width_applied = true;
                 // Measured against the size apply_initial_window_size ASKED

@@ -114,26 +114,41 @@ fn main() -> anyhow::Result<()> {
 
     let icon = load_icon();
 
-    // Deliberately the smallest allowed window, not the image's size.
+    // THE size, not a provisional one. What is asked for here is very nearly
+    // what the window will be for the rest of its life, because nothing
+    // afterwards can change it:
     //
-    // The real size is set by App::apply_initial_window_size once the display
-    // scale is known, and it can only ever GROW the window: the one viewport
-    // command this stack honours is MinInnerSize, a floor. So whatever is
-    // asked for here is a floor of its own that can never be lowered, and
-    // asking for the image's dimensions -- which are pixels, while this is
-    // points -- is asking for a floor that is too high on any scaled display.
+    //   ViewportCommand::InnerSize     ignored (measured: 60 sends, no movement)
+    //   ViewportCommand::MaxInnerSize  ignored
+    //   ViewportCommand::MinInnerSize  honoured, and the only one that is
     //
-    // Starting at the minimum means every subsequent correction is a growth,
-    // which works. The window pops out to its real size within a few frames.
+    // And a floor imposed later that disagrees with this number is not merely
+    // ineffective, it is visible: the compositor keeps proposing the size the
+    // window was created at, the floor pushes back, and the two alternate on
+    // every reconfigure -- a flicker under the cursor for as long as the
+    // window is being dragged.
     //
-    // (It is tempting to ask for the image size "for the scale 1.0 case".
-    // Measured on Hyprland at 1.25 that is what left a 200x150 capture in a
-    // 648x380 window with no way back down.)
-    let _ = (img_w, img_h);
+    // So this asks for the image's own dimensions and App corrects nothing
+    // downward. That is knowingly a little large on a fractional-scale
+    // display: these are PIXELS where inner_size wants POINTS, so the window
+    // comes out scale-factor bigger than the image strictly needs. It is the
+    // lesser fault by a distance -- exactly right at scale 1.0, and the
+    // alternative was correct-but-flickering.
+    //
+    // eframe clamps this to the monitor's point size before the window is
+    // built (epi_integration.rs, clamp_size_to_monitor_size) using winit's
+    // real scale factor, so a capture bigger than the screen does not ask for
+    // a window bigger than the screen.
+    //
+    // MIN_WINDOW_W_POINTS is wide enough to clear the toolbars' own measured
+    // minimum, so the floor they impose later never disagrees with this.
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("slappyshot")
         .with_app_id("slappyshot")
-        .with_inner_size([app::MIN_WINDOW_W_POINTS, app::MIN_WINDOW_H_POINTS])
+        .with_inner_size([
+            img_w.max(app::MIN_WINDOW_W_POINTS),
+            img_h.max(app::MIN_WINDOW_H_POINTS) + app::TOOLBAR_RESERVE_POINTS,
+        ])
         .with_min_inner_size([app::MIN_WINDOW_W_POINTS, app::MIN_WINDOW_H_POINTS])
         .with_fullscreen(config.general.fullscreen)
         .with_decorations(!config.general.no_window_decoration);
