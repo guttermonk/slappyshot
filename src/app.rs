@@ -1008,7 +1008,7 @@ impl App {
                     let s = i2s(*top_left);
                     let e = i2s(*top_left + *size);
                     let r = Rect::from_two_pos(s, e);
-                    painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, Color32::WHITE), egui::StrokeKind::Inside);
+                    painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0_f32, Color32::WHITE), egui::StrokeKind::Inside);
                 }
             }
             ActiveDrawing::Highlight {
@@ -1101,7 +1101,7 @@ impl App {
             }
 
             // Border
-            painter.rect_stroke(crop_rect, CornerRadius::ZERO, Stroke::new(2.0, Color32::WHITE), egui::StrokeKind::Inside);
+            painter.rect_stroke(crop_rect, CornerRadius::ZERO, Stroke::new(2.0_f32, Color32::WHITE), egui::StrokeKind::Inside);
 
             // Confirm instruction
             painter.text(
@@ -1313,7 +1313,7 @@ impl eframe::App for App {
                         let resp = ui
                             .add_sized(
                                 [30.0, 30.0],
-                                egui::SelectableLabel::new(
+                                egui::Button::selectable(
                                     selected,
                                     egui::RichText::new(tool.icon()).size(20.0),
                                 ),
@@ -1325,7 +1325,7 @@ impl eframe::App for App {
                                 ui.painter().rect_stroke(
                                     resp.rect,
                                     CornerRadius::same(2),
-                                    Stroke::new(2.0, Color32::WHITE),
+                                    Stroke::new(2.0_f32, Color32::WHITE),
                                     egui::StrokeKind::Inside,
                                 );
                                 ui.ctx().request_repaint();
@@ -1405,7 +1405,7 @@ impl eframe::App for App {
                         if ui
                             .add_sized(
                                 [22.0, 22.0],
-                                egui::SelectableLabel::new(self.style.size == *size, *label),
+                                egui::Button::selectable(self.style.size == *size, *label),
                             )
                             .on_hover_text(format!("{} (Shift+{} | [ / ])", size.label(), label))
                             .clicked()
@@ -1428,7 +1428,7 @@ impl eframe::App for App {
                             painter.rect_stroke(
                                 resp.rect.shrink(2.0),
                                 CornerRadius::same(1),
-                                Stroke::new(2.0, Color32::WHITE),
+                                Stroke::new(2.0_f32, Color32::WHITE),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -1622,7 +1622,7 @@ impl eframe::App for App {
         }
 
         // Central panel
-        let frame = egui::Frame::none().fill(Color32::from_rgb(30, 30, 35));
+        let frame = egui::Frame::NONE.fill(Color32::from_rgb(30, 30, 35));
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             self.canvas_rect = ui.available_rect_before_wrap();
 
@@ -1842,7 +1842,7 @@ fn draw_one_annotation(
             let r = font_size * 0.8;
             let color = style.color.to_egui();
             painter.circle_filled(sp, r, color);
-            painter.circle_stroke(sp, r, Stroke::new(1.5, Color32::WHITE));
+            painter.circle_stroke(sp, r, Stroke::new(1.5_f32, Color32::WHITE));
             let luma = (0.2126 * style.color.r as f32
                 + 0.7152 * style.color.g as f32
                 + 0.0722 * style.color.b as f32)
