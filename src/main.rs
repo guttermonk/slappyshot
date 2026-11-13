@@ -118,17 +118,22 @@ fn main() -> anyhow::Result<()> {
         viewport = viewport.with_icon(icon);
     }
 
+    // `vsync: false` used to be set here, and the field is gone in eframe
+    // 0.37 — but it would not be wanted even if it were still available.
+    //
+    // It was a workaround: on Wayland an occluded surface (on another
+    // workspace, say) stops receiving frame callbacks, so a vsync'd
+    // eglSwapBuffers blocked forever inside the swap. The app thread never
+    // returned to dispatch the Wayland queue, sctk never auto-ponged
+    // xdg_wm_base.ping, and Hyprland's ANR detection put up an "Application
+    // Not Responding" dialog. Turning vsync off stopped the swap blocking.
+    //
+    // eframe 0.37 fixes the cause -- "Keep running on Wayland when frame
+    // callbacks stop", emilk/egui#8631 -- so the workaround goes with it.
+    // The wake thread below stays: it is cheap, and it is the belt to this
+    // particular braces.
     let native_options = eframe::NativeOptions {
         viewport,
-        // Disable vsync so eglSwapBuffers doesn't block waiting for a frame
-        // callback. On Wayland, an occluded surface (e.g. on another workspace)
-        // never receives frame callbacks, so a vsync'd swap wedges the app
-        // thread inside swap_buffers — which means the Wayland event queue
-        // never gets dispatched, sctk's auto-pong for xdg_wm_base.ping never
-        // runs, and compositors with ANR detection (Hyprland) raise an
-        // "Application Not Responding" dialog. Slappyshot is a static
-        // annotation UI; vsync brings nothing and tearing is not a concern.
-        vsync: false,
         ..Default::default()
     };
 
@@ -138,25 +143,35 @@ fn main() -> anyhow::Result<()> {
         "slappyshot",
         native_options,
         Box::new(|cc| {
-            let mut fonts = egui::FontDefinitions::default();
-            fonts.font_data.insert(
-                "nerd_symbols".to_owned(),
+            // The toolbar icons are Nerd Font glyphs, so that font is added to
+            // both families as a fallback.
+            //
+            // add_font rather than mutating FontDefinitions::default(): the
+            // old code rebuilt the whole definition and called set_fonts,
+            // which in egui 0.37 also discards the font PROVIDERS eframe
+            // installs (system fonts, via fontique). add_font keeps them and
+            // adds to them.
+            //
+            // Lowest, not Highest: these icons live in the private use area,
+            // where nothing else competes, so there is nothing to win a fight
+            // against -- and Highest would put a symbols-only font ahead of
+            // the real text fonts for every lookup.
+            cc.egui_ctx.add_font(egui::FontInsert::new(
+                "nerd_symbols",
                 egui::FontData::from_static(include_bytes!(
                     "../assets/SymbolsNerdFont-Regular.ttf"
-                ))
-                .into(),
-            );
-            fonts
-                .families
-                .get_mut(&egui::FontFamily::Proportional)
-                .unwrap()
-                .push("nerd_symbols".to_owned());
-            fonts
-                .families
-                .get_mut(&egui::FontFamily::Monospace)
-                .unwrap()
-                .push("nerd_symbols".to_owned());
-            cc.egui_ctx.set_fonts(fonts);
+                )),
+                vec![
+                    egui::InsertFontFamily {
+                        family: egui::FontFamily::Proportional,
+                        priority: egui::FontPriority::Lowest,
+                    },
+                    egui::InsertFontFamily {
+                        family: egui::FontFamily::Monospace,
+                        priority: egui::FontPriority::Lowest,
+                    },
+                ],
+            ));
 
             // Wake the event loop from outside so winit keeps servicing the
             // Wayland queue (and replying to xdg_wm_base pings) even when the

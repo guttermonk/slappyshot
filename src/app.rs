@@ -427,7 +427,7 @@ impl App {
         //
         // The 1.0 of slack is for a compositor's rounding, not for the window
         // being a bit small: a point under is still under.
-        let have = ctx.screen_rect().size();
+        let have = ctx.input(|i| i.viewport_rect()).size();
         if have.x + 1.0 >= want.x && have.y + 1.0 >= want.y {
             self.initial_size_attempts = INITIAL_SIZE_MAX_ATTEMPTS;
             // Let go of the floor now that the size has landed, so the window
@@ -1378,7 +1378,19 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    // egui 0.37 replaced `update(&mut self, ctx, frame)` with
+    // `ui(&mut self, ui, frame)`: the framework hands the app a root Ui now
+    // rather than a bare Context, because panels are laid out inside a Ui
+    // instead of against the Context.
+    //
+    // The body still works almost entirely in terms of the Context, so it is
+    // taken back out of the Ui here rather than rewriting every call. Cloned
+    // because the panels want `&mut ui` while `ctx` is still in use, and a
+    // borrow would keep `ui` frozen. A Context is a handle around an Arc, so
+    // this is a refcount bump rather than a copy of any UI state.
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = &ui.ctx().clone();
+
         // Ensure texture is uploaded on first frame
         if !self.initialized {
             self.initialized = true;
@@ -1403,17 +1415,24 @@ impl eframe::App for App {
 
         self.handle_keyboard(ctx);
 
+        // show_collapsible replaced show_animated in egui 0.37, and it takes
+        // the expanded flag by &mut so a panel can collapse itself when its
+        // handle is dragged. It cannot be `&mut self.toolbars_visible`,
+        // because the closures below borrow all of `self` -- hence a local,
+        // copied back once both panels have had their say.
+        let mut toolbars_visible = self.toolbars_visible;
+
         // Top toolbar
-        egui::TopBottomPanel::top("tools")
+        egui::Panel::top("tools")
             .frame(
-                egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin {
+                egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
                     top: 3,
                     bottom: 4,
                     left: 0,
                     right: 0,
                 }),
             )
-            .show_animated(ctx, self.toolbars_visible, |ui| {
+            .show_collapsible(ui, &mut toolbars_visible, |ui| {
                 let available = ui.available_width();
                 let leading = ((available - self.top_toolbar_content_width) / 2.0).max(0.0);
                 let r = ui.horizontal(|ui| {
@@ -1514,16 +1533,16 @@ impl eframe::App for App {
             });
 
         // Bottom toolbar
-        egui::TopBottomPanel::bottom("style_bar")
+        egui::Panel::bottom("style_bar")
             .frame(
-                egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin {
+                egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
                     top: 4,
                     bottom: 4,
                     left: 0,
                     right: 0,
                 }),
             )
-            .show_animated(ctx, self.toolbars_visible, |ui| {
+            .show_collapsible(ui, &mut toolbars_visible, |ui| {
                 let available = ui.available_width();
                 let leading = ((available - self.bottom_toolbar_content_width) / 2.0).max(0.0);
                 let r = ui.horizontal(|ui| {
@@ -1617,6 +1636,8 @@ impl eframe::App for App {
 
         // The window's minimum, from every constraint at once. Must run after
         // the toolbars have laid out, since it reads their measured widths.
+        self.toolbars_visible = toolbars_visible;
+
         self.update_min_inner_size(ctx);
 
         let min_toolbar_w = self
@@ -1637,7 +1658,7 @@ impl eframe::App for App {
             // value and never widened for the toolbar.
             let current = self
                 .initial_size_request
-                .unwrap_or_else(|| ctx.screen_rect().size());
+                .unwrap_or_else(|| ctx.input(|i| i.viewport_rect()).size());
             if current.x < min_toolbar_w {
                 ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
                     min_toolbar_w,
@@ -1667,14 +1688,14 @@ impl eframe::App for App {
                         self.show_info = false;
                     }
                     egui::CentralPanel::default()
-                        .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(
-                            egui::Margin {
+                        .frame(
+                            egui::Frame::central_panel(ui.style()).inner_margin(egui::Margin {
                                 left: 16,
                                 right: 8,
                                 top: 8,
                                 bottom: 8,
-                            },
-                        ))
+                            }),
+                        )
                         .show(ctx, |ui| {
                             egui::Grid::new("info_grid")
                                 .num_columns(2)
@@ -1744,7 +1765,7 @@ impl eframe::App for App {
 
         // Central panel
         let frame = egui::Frame::NONE.fill(Color32::from_rgb(30, 30, 35));
-        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             self.canvas_rect = ui.available_rect_before_wrap();
 
             let (response, painter) =
@@ -1819,14 +1840,24 @@ impl eframe::App for App {
                 });
                 let escape_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
 
-                egui::Area::new(egui::Id::new("text_input"))
+                // Id::unique, not IdSalt::new: egui 0.37 split the old
+                // Id::new in two, and this is a root id for a top-level Area
+                // rather than a salt unique within some parent. Same hashing,
+                // so the id is the same across frames -- which matters,
+                // because the Area's position and focus are stored under it.
+                egui::Area::new(egui::Id::unique("text_input"))
                     .fixed_pos(screen_pos)
                     .show(ctx, |ui| {
                         let resp = ui.add(
                             egui::TextEdit::multiline(&mut local_content)
                                 .font(egui::FontId::proportional(font_size))
                                 .desired_width(300.0)
-                                .frame(true)
+                                // `.frame(true)` was here. In egui 0.37 frame()
+                                // takes a Frame rather than a bool, and true
+                                // only ever meant "the theme's frame" -- which
+                                // is what an unset frame resolves to now. The
+                                // call said nothing, so it is gone rather than
+                                // spelled out again.
                                 .text_color(color),
                         );
                         resp.request_focus();
