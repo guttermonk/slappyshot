@@ -1,4 +1,4 @@
-use egui::{Color32, Pos2, Rect, Rounding, Stroke, Vec2};
+use egui::{Color32, Pos2, Rect, CornerRadius, Stroke, Vec2};
 use image::RgbaImage;
 use std::time::Instant;
 
@@ -9,6 +9,29 @@ use crate::tools::{
     ActiveDrawing, Annotation, CropRect, CropState, HighlightAnnotation, HighlighterKind, Smoother,
     ToolType, tool_from_string,
 };
+
+/// Window geometry, in logical points -- the unit egui and eframe size
+/// windows in. Shared with main.rs so its provisional ViewportBuilder size and
+/// the corrected one in App::apply_initial_window_size cannot drift apart.
+///
+/// Vertical room for the toolbar strip above the canvas, so a window sized to
+/// the image does not then cover part of it.
+pub const TOOLBAR_RESERVE_POINTS: f32 = 80.0;
+/// Small captures still need a window big enough to hold the toolbars.
+pub const MIN_WINDOW_W_POINTS: f32 = 400.0;
+pub const MIN_WINDOW_H_POINTS: f32 = 300.0;
+
+/// How many frames apply_initial_window_size will keep asking for its size
+/// before accepting the compositor's answer. Generous enough to outlast the
+/// first configure round-trip, short enough that it is over long before a
+/// human could have resized the window themselves.
+const INITIAL_SIZE_MAX_ATTEMPTS: u32 = 60;
+
+/// How many of those frames may be spent waiting for the surface to meet an
+/// output and report a real scale factor. Measured at 2 on Hyprland; this
+/// leaves room without risking the whole budget on a compositor that never
+/// reports one.
+const INITIAL_SIZE_SCALE_GRACE: u32 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PointerDrag {
@@ -42,6 +65,17 @@ pub struct App {
     top_toolbar_content_width: f32,
     bottom_toolbar_content_width: f32,
     toolbar_min_width_applied: bool,
+    /// What apply_initial_window_size asked for, kept because a viewport
+    /// command does not show up in screen_rect until the next frame.
+    initial_size_request: Option<Vec2>,
+    /// Frames spent asking for that size. See apply_initial_window_size: one
+    /// request is not enough, and an unbounded number would fight the user.
+    initial_size_attempts: u32,
+    /// A floor held over the window while it is being sized, because a floor
+    /// is the only thing this compositor stack honours -- see
+    /// apply_initial_window_size. Dropped once the size lands, so the window
+    /// stays freely resizable afterwards.
+    forced_min: Option<Vec2>,
     pointer_drag: PointerDrag,
     key_flash: Option<(ToolType, Instant)>,
     show_info: bool,
@@ -95,6 +129,9 @@ impl App {
             top_toolbar_content_width: 9999.0,
             bottom_toolbar_content_width: 9999.0,
             toolbar_min_width_applied: false,
+            initial_size_request: None,
+            initial_size_attempts: 0,
+            forced_min: None,
             pointer_drag: PointerDrag::None,
             key_flash: None,
             show_info: false,
@@ -188,6 +225,127 @@ impl App {
         self.active_drawing = ActiveDrawing::None;
         self.drag_start = None;
         self.active_tool = tool;
+    }
+
+    /// Size the window to the image, once, on the first frame that knows the
+    /// display scale.
+    ///
+    /// main.rs asks for a size in ViewportBuilder and cannot get it right:
+    /// `inner_size` is in logical POINTS, the image is in PIXELS, and the
+    /// ratio between them is the display's scale factor, which no monitor has
+    /// reported yet at that point in startup. On a scale 1.0 display the two
+    /// numbers happen to coincide and the mistake is invisible, which is why
+    /// this went unnoticed; at 1.25 the window opens 25% oversized in each
+    /// dimension. That value is only available from the context, so the real
+    /// sizing has to happen here and main.rs's call is a provisional guess.
+    ///
+    /// Clamped to the monitor, because the floor in main.rs (400x300) has
+    /// never had a matching ceiling: a full-screen capture asks for a window
+    /// larger than the screen it was taken from, at ANY scale. The image is
+    /// not shrunk to fit -- zoom stays 1:1 and the existing pan (drag, or the
+    /// arrow keys with the pointer tool) reaches the rest of it.
+    ///
+    /// Clamped to the whole monitor rather than a work area minus some
+    /// allowance for a bar, because Wayland tells a client the former and not
+    /// the latter. Inventing a margin here would be guessing at a panel this
+    /// program cannot see; the compositor places floating windows and does
+    /// know.
+    ///
+    /// Asked for repeatedly, and that is the part that took a measurement to
+    /// learn. A single request sent on the first frame is simply lost: the
+    /// Wayland surface has not been configured yet, so there is nothing to
+    /// resize, and the window keeps main.rs's provisional size. Measured on
+    /// Hyprland at scale 1.25 -- a 200x150 capture opened 800x760, which is
+    /// the OLD formula exactly, with the correction compiled in and running.
+    /// The existing toolbar min-width command appears to work only because it
+    /// fires later, once the toolbars have been laid out at least once.
+    ///
+    /// So it re-asks until screen_rect comes back the size it asked for, and
+    /// gives up after INITIAL_SIZE_MAX_ATTEMPTS. Both halves matter: without
+    /// the retry the request never lands, and without the cap a compositor
+    /// that declines the size -- tiled, maximised, snapped -- would be fought
+    /// every frame for as long as the window is open, including after the
+    /// user has resized it by hand.
+    fn apply_initial_window_size(&mut self, ctx: &egui::Context) {
+        if self.initial_size_attempts >= INITIAL_SIZE_MAX_ATTEMPTS
+            || self.config.general.fullscreen
+        {
+            return;
+        }
+
+        let ppp = ctx.pixels_per_point();
+        if !(ppp > 0.0) {
+            return; // Not known yet. Try again next frame.
+        }
+
+        // Wait for the surface to meet an output before committing to a size.
+        //
+        // This is the trap this function was written to avoid and then fell
+        // into anyway. On the first frames egui reports a PLACEHOLDER
+        // pixels_per_point of 1.0 and no monitor; the real scale arrives a
+        // couple of frames later (1.25 on the first frame with a monitor, in
+        // the trace that found this). Computing the size from that placeholder
+        // and caching it reproduces exactly the pixels-as-points mistake in
+        // main.rs -- the correction and the bug agreeing on the wrong answer.
+        //
+        // monitor_size is the signal rather than ppp itself, because a 1.0
+        // scale is perfectly legitimate and indistinguishable from the
+        // placeholder by value alone. A monitor means the surface has been
+        // configured, which is when the scale becomes real.
+        let monitor = ctx.input(|i| i.viewport().monitor_size);
+        if monitor.is_none() && self.initial_size_attempts < INITIAL_SIZE_SCALE_GRACE {
+            self.initial_size_attempts += 1;
+            ctx.request_repaint();
+            return;
+        }
+
+        let want = *self.initial_size_request.get_or_insert_with(|| {
+            // Points, from pixels.
+            let mut size = egui::vec2(
+                self.source_image.width() as f32 / ppp,
+                self.source_image.height() as f32 / ppp + TOOLBAR_RESERVE_POINTS,
+            );
+
+            // Still None after the grace period: a window of the right size
+            // unclamped beats a correctly clamped one that never arrives.
+            if let Some(monitor) = monitor {
+                size = size.min(monitor);
+            }
+
+            size.max(egui::vec2(MIN_WINDOW_W_POINTS, MIN_WINDOW_H_POINTS))
+        });
+
+        // Close enough: a compositor is free to round, and chasing a fraction
+        // of a point would mean never stopping.
+        let have = ctx.screen_rect().size();
+        if (have.x - want.x).abs() <= 1.0 && (have.y - want.y).abs() <= 1.0 {
+            self.initial_size_attempts = INITIAL_SIZE_MAX_ATTEMPTS;
+            // Let go of the floor now that the size has landed, so the window
+            // can still be made smaller by hand afterwards.
+            self.forced_min = None;
+            return;
+        }
+
+        self.initial_size_attempts += 1;
+        // The floor, not the size request, is what actually moves this window.
+        //
+        // ViewportCommand::InnerSize is ignored here -- measured, 60 requests
+        // over 60 frames with screen_rect never changing by a point, in both
+        // directions. MinInnerSize IS honoured: raising it to the wanted size
+        // grew a stuck 960x540 window to 960x800 immediately. That asymmetry
+        // is also why the window ever reached the toolbar's width: that is a
+        // minimum too, not a resize.
+        //
+        // So the size is imposed as a floor and released on arrival. It can
+        // only ever grow the window this way, which is the direction that
+        // matters: the stuck size is a clamp the window is too SMALL for.
+        self.forced_min = Some(want);
+        ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(want));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(want));
+        // egui only redraws on demand, and nothing else here guarantees
+        // another frame -- without this the retry would wait for the user to
+        // move the mouse.
+        ctx.request_repaint();
     }
 
     fn zoom_step(&mut self, factor: f32) {
@@ -817,11 +975,11 @@ impl App {
                     let s = i2s(*top_left);
                     let e = i2s(*top_left + *size);
                     let r = Rect::from_two_pos(s, e);
-                    let rounding = Rounding::same(self.config.general.corner_roundness * zoom);
+                    let rounding = CornerRadius::same((self.config.general.corner_roundness * zoom).round().clamp(0.0, 255.0) as u8);
                     if self.style.fill {
                         painter.rect_filled(r, rounding, color);
                     } else {
-                        painter.rect_stroke(r, rounding, stroke);
+                        painter.rect_stroke(r, rounding, stroke, egui::StrokeKind::Inside);
                     }
                 }
             }
@@ -850,7 +1008,7 @@ impl App {
                     let s = i2s(*top_left);
                     let e = i2s(*top_left + *size);
                     let r = Rect::from_two_pos(s, e);
-                    painter.rect_stroke(r, Rounding::ZERO, Stroke::new(1.0, Color32::WHITE));
+                    painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, Color32::WHITE), egui::StrokeKind::Inside);
                 }
             }
             ActiveDrawing::Highlight {
@@ -871,7 +1029,7 @@ impl App {
                             let s = i2s(*start);
                             let e = i2s(*start + *block_size);
                             let r = Rect::from_two_pos(s, e);
-                            painter.rect_filled(r, Rounding::ZERO, hi_color);
+                            painter.rect_filled(r, CornerRadius::ZERO, hi_color);
                         }
                     }
                     HighlighterKind::Freehand => {
@@ -905,7 +1063,7 @@ impl App {
             if crop_rect.top() > canvas.top() {
                 painter.rect_filled(
                     Rect::from_min_max(canvas.min, egui::pos2(canvas.max.x, crop_rect.top())),
-                    Rounding::ZERO,
+                    CornerRadius::ZERO,
                     dim,
                 );
             }
@@ -913,7 +1071,7 @@ impl App {
             if crop_rect.bottom() < canvas.bottom() {
                 painter.rect_filled(
                     Rect::from_min_max(egui::pos2(canvas.min.x, crop_rect.bottom()), canvas.max),
-                    Rounding::ZERO,
+                    CornerRadius::ZERO,
                     dim,
                 );
             }
@@ -926,7 +1084,7 @@ impl App {
                         egui::pos2(canvas.min.x, top),
                         egui::pos2(crop_rect.left(), bottom),
                     ),
-                    Rounding::ZERO,
+                    CornerRadius::ZERO,
                     dim,
                 );
             }
@@ -937,13 +1095,13 @@ impl App {
                         egui::pos2(crop_rect.right(), top),
                         egui::pos2(canvas.max.x, bottom),
                     ),
-                    Rounding::ZERO,
+                    CornerRadius::ZERO,
                     dim,
                 );
             }
 
             // Border
-            painter.rect_stroke(crop_rect, Rounding::ZERO, Stroke::new(2.0, Color32::WHITE));
+            painter.rect_stroke(crop_rect, CornerRadius::ZERO, Stroke::new(2.0, Color32::WHITE), egui::StrokeKind::Inside);
 
             // Confirm instruction
             painter.text(
@@ -1097,6 +1255,8 @@ impl eframe::App for App {
             apply_theme(ctx, &self.config.theme);
         }
 
+        self.apply_initial_window_size(ctx);
+
         // Handle deferred actions
         if self.pending_copy {
             self.pending_copy = false;
@@ -1116,10 +1276,10 @@ impl eframe::App for App {
         egui::TopBottomPanel::top("tools")
             .frame(
                 egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin {
-                    top: 3.0,
-                    bottom: 4.0,
-                    left: 0.0,
-                    right: 0.0,
+                    top: 3,
+                    bottom: 4,
+                    left: 0,
+                    right: 0,
                 }),
             )
             .show_animated(ctx, self.toolbars_visible, |ui| {
@@ -1164,8 +1324,9 @@ impl eframe::App for App {
                             if flash_tool == tool && flash_time.elapsed().as_millis() < 150 {
                                 ui.painter().rect_stroke(
                                     resp.rect,
-                                    Rounding::same(2.0),
+                                    CornerRadius::same(2),
                                     Stroke::new(2.0, Color32::WHITE),
+                                    egui::StrokeKind::Inside,
                                 );
                                 ui.ctx().request_repaint();
                             }
@@ -1224,10 +1385,10 @@ impl eframe::App for App {
         egui::TopBottomPanel::bottom("style_bar")
             .frame(
                 egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin {
-                    top: 4.0,
-                    bottom: 4.0,
-                    left: 0.0,
-                    right: 0.0,
+                    top: 4,
+                    bottom: 4,
+                    left: 0,
+                    right: 0,
                 }),
             )
             .show_animated(ctx, self.toolbars_visible, |ui| {
@@ -1262,12 +1423,13 @@ impl eframe::App for App {
                         let selected = self.style.color == Color { r, g, b, a };
                         let (resp, painter) =
                             ui.allocate_painter(egui::vec2(22.0, 22.0), egui::Sense::click());
-                        painter.rect_filled(resp.rect, Rounding::same(3.0), c);
+                        painter.rect_filled(resp.rect, CornerRadius::same(3), c);
                         if selected {
                             painter.rect_stroke(
                                 resp.rect.shrink(2.0),
-                                Rounding::same(1.0),
+                                CornerRadius::same(1),
                                 Stroke::new(2.0, Color32::WHITE),
+                                egui::StrokeKind::Inside,
                             );
                         }
                         // Only the first 8 palette slots have number-key shortcuts ('1'..='8');
@@ -1329,18 +1491,35 @@ impl eframe::App for App {
             .max(self.bottom_toolbar_content_width)
             + 20.0;
         if min_toolbar_w < 9999.0 {
-            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
-                min_toolbar_w,
-                300.0,
-            )));
+            // Both minimums at once while the window is being sized. This runs
+            // every frame and apply_initial_window_size runs earlier in the
+            // same one, so sending the toolbar's floor alone would overwrite
+            // the sizing floor before it could take effect -- last command
+            // wins, and this is the later command.
+            let mut min = egui::vec2(min_toolbar_w, MIN_WINDOW_H_POINTS);
+            if let Some(forced) = self.forced_min {
+                min = min.max(forced);
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min));
             if !self.toolbar_min_width_applied {
                 self.toolbar_min_width_applied = true;
-                let current_w = ctx.screen_rect().width();
-                if current_w < min_toolbar_w {
-                    let current_h = ctx.screen_rect().height();
+                // Measured against the size apply_initial_window_size ASKED
+                // for, not against screen_rect, whenever a request is
+                // outstanding. Both run in the same frame and this one runs
+                // second, but a viewport command does not land until the next
+                // frame -- so screen_rect here still reports the provisional
+                // size from main.rs. Widening a window on the strength of a
+                // measurement that is about to be replaced gets the decision
+                // backwards: a small capture correctly sized down to the 400pt
+                // minimum would be judged "wide enough" against the stale
+                // value and never widened for the toolbar.
+                let current = self
+                    .initial_size_request
+                    .unwrap_or_else(|| ctx.screen_rect().size());
+                if current.x < min_toolbar_w {
                     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
                         min_toolbar_w,
-                        current_h,
+                        current.y,
                     )));
                 }
             }
@@ -1369,10 +1548,10 @@ impl eframe::App for App {
                     egui::CentralPanel::default()
                         .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(
                             egui::Margin {
-                                left: 16.0,
-                                right: 8.0,
-                                top: 8.0,
-                                bottom: 8.0,
+                                left: 16,
+                                right: 8,
+                                top: 8,
+                                bottom: 8,
                             },
                         ))
                         .show(ctx, |ui| {
@@ -1598,13 +1777,13 @@ fn draw_one_annotation(
             let s = i2s(*top_left);
             let e = i2s(*top_left + *size);
             let r = Rect::from_two_pos(s, e);
-            let rounding = Rounding::same(*corner_roundness * zoom);
+            let rounding = CornerRadius::same((*corner_roundness * zoom).round().clamp(0.0, 255.0) as u8);
             let lw = style.size.to_line_width(factor) * zoom;
             let color = style.color.to_egui();
             if style.fill {
                 painter.rect_filled(r, rounding, color);
             } else {
-                painter.rect_stroke(r, rounding, Stroke::new(lw, color));
+                painter.rect_stroke(r, rounding, Stroke::new(lw, color), egui::StrokeKind::Inside);
             }
         }
         Annotation::Ellipse {
@@ -1718,7 +1897,7 @@ fn draw_one_annotation(
                     let s = i2s(*top_left);
                     let e = i2s(*top_left + *size);
                     let r = Rect::from_two_pos(s, e);
-                    painter.rect_filled(r, Rounding::ZERO, hi_color);
+                    painter.rect_filled(r, CornerRadius::ZERO, hi_color);
                 }
                 HighlightAnnotation::Freehand { start, points } => {
                     if !points.is_empty() {

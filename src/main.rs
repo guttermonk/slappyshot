@@ -114,11 +114,27 @@ fn main() -> anyhow::Result<()> {
 
     let icon = load_icon();
 
+    // Deliberately the smallest allowed window, not the image's size.
+    //
+    // The real size is set by App::apply_initial_window_size once the display
+    // scale is known, and it can only ever GROW the window: the one viewport
+    // command this stack honours is MinInnerSize, a floor. So whatever is
+    // asked for here is a floor of its own that can never be lowered, and
+    // asking for the image's dimensions -- which are pixels, while this is
+    // points -- is asking for a floor that is too high on any scaled display.
+    //
+    // Starting at the minimum means every subsequent correction is a growth,
+    // which works. The window pops out to its real size within a few frames.
+    //
+    // (It is tempting to ask for the image size "for the scale 1.0 case".
+    // Measured on Hyprland at 1.25 that is what left a 200x150 capture in a
+    // 648x380 window with no way back down.)
+    let _ = (img_w, img_h);
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("slappyshot")
         .with_app_id("slappyshot")
-        .with_inner_size([img_w.max(400.0), img_h.max(300.0) + 80.0])
-        .with_min_inner_size([400.0, 300.0])
+        .with_inner_size([app::MIN_WINDOW_W_POINTS, app::MIN_WINDOW_H_POINTS])
+        .with_min_inner_size([app::MIN_WINDOW_W_POINTS, app::MIN_WINDOW_H_POINTS])
         .with_fullscreen(config.general.fullscreen)
         .with_decorations(!config.general.no_window_decoration);
     if let Some(icon) = icon {
@@ -150,7 +166,7 @@ fn main() -> anyhow::Result<()> {
                 "nerd_symbols".to_owned(),
                 egui::FontData::from_static(include_bytes!(
                     "../assets/SymbolsNerdFont-Regular.ttf"
-                )),
+                )).into(),
             );
             fonts
                 .families
