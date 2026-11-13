@@ -18,17 +18,14 @@ jobs:
             archive: tar.gz
 
     runs-on: ${{ matrix.os }}
-    container:
-      image: ghcr.io/gtk-rs/gtk4-rs/gtk4:latest
 
     permissions:
       contents: write
 
     steps:
-      - name: Install dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: yum install -y gtk4-devel libadwaita-devel
-
+      # No system libraries to install: wayland-sys is built with its dlopen
+      # feature, and X11 and xkbcommon arrive through x11-dl and xkbcommon-dl,
+      # which dlopen too. Nothing links against a -dev package at build time.
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
