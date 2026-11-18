@@ -62,6 +62,9 @@ fn main() -> anyhow::Result<()> {
     if args.auto_copy {
         config.general.auto_copy = true;
     }
+    if args.no_zoom_to_fit {
+        config.general.zoom_to_fit = false;
+    }
 
     let image = match load_image(args.filename.as_deref()) {
         Ok(img) => img,

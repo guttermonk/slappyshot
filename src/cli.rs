@@ -60,4 +60,8 @@ pub struct Args {
     /// Auto-copy after annotation
     #[arg(long)]
     pub auto_copy: bool,
+
+    /// Open at 100% instead of fitting the image to the window
+    #[arg(long)]
+    pub no_zoom_to_fit: bool,
 }

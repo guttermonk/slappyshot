@@ -80,7 +80,8 @@ Tool shortcuts are configurable via `[keybinds]` in the config file.
 |----------|--------|
 | `=` / `+` | Zoom in |
 | `-` | Zoom out |
-| `0` | Reset zoom |
+| `0` | Actual size (100%) |
+| `Shift+F` | Fit image to window |
 | Scroll wheel | Zoom (centered on cursor) |
 | Middle mouse drag | Pan |
 | Pointer tool drag | Pan (when not over an annotation) |
@@ -106,6 +107,7 @@ Options:
       --annotation-size-factor <FACTOR>   Scale annotation sizes up or down
       --early-exit                        Exit after copy/save
       --auto-copy                         Auto-copy to clipboard after each annotation change
+      --no-zoom-to-fit                    Open at 100% instead of fitting the image to the window
   -h, --help                              Print help
   -V, --version                           Print version
 ```
@@ -144,6 +146,9 @@ primary_highlighter = "block"
 brush_smooth_history_size = 5
 # Zoom step factor per scroll tick
 zoom_factor = 1.1
+# Fit the image to the window on startup. Only ever scales down: a capture
+# smaller than the window is shown at 100%, never magnified.
+zoom_to_fit = true
 # Pan step size in pixels (for keyboard panning)
 pan_step_size = 50.0
 # Disable window decorations

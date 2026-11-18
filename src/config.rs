@@ -54,6 +54,8 @@ pub struct GeneralConfig {
     pub brush_smooth_history_size: usize,
     #[serde(default = "default_zoom_factor")]
     pub zoom_factor: f32,
+    #[serde(default = "default_zoom_to_fit")]
+    pub zoom_to_fit: bool,
     #[serde(default = "default_pan_step_size")]
     pub pan_step_size: f32,
     #[serde(default)]
@@ -86,6 +88,16 @@ fn default_brush_smooth_history_size() -> usize {
 fn default_zoom_factor() -> f32 {
     1.1
 }
+/// Fit the image to the window on startup, rather than showing it at 100%.
+///
+/// On by default because a capture is routinely bigger than the window it can
+/// be given -- a full-screen grab always is, since the window has to leave
+/// room for the panel and its own toolbars -- and seeing all of it shrunk
+/// beats seeing part of it at full size. Fitting only ever scales DOWN, so
+/// this never magnifies a small capture.
+fn default_zoom_to_fit() -> bool {
+    true
+}
 fn default_pan_step_size() -> f32 {
     50.0
 }
@@ -111,6 +123,7 @@ impl Default for GeneralConfig {
             primary_highlighter: default_primary_highlighter(),
             brush_smooth_history_size: default_brush_smooth_history_size(),
             zoom_factor: default_zoom_factor(),
+            zoom_to_fit: default_zoom_to_fit(),
             pan_step_size: default_pan_step_size(),
             no_window_decoration: false,
             disable_notifications: false,

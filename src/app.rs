@@ -72,6 +72,16 @@ const TOOLBAR_MIN_WIDTH_PADDING: f32 = 20.0;
 /// point is below anything a person can see and well above the jitter.
 const MIN_SIZE_EPSILON: f32 = 1.0;
 
+/// Zoom limits, as a fraction of actual size -- 5% to 5000%. Applied through
+/// App::clamp_zoom rather than to `zoom` directly, because `zoom` is measured
+/// in points per pixel and these are measured against the image.
+const MIN_ZOOM_SCALE: f32 = 0.05;
+const MAX_ZOOM_SCALE: f32 = 50.0;
+
+/// Space left around the image when it is fitted to the window, so a fitted
+/// capture does not sit edge to edge with the toolbars.
+const FIT_MARGIN_POINTS: f32 = 8.0;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PointerDrag {
     None,
@@ -82,7 +92,21 @@ enum PointerDrag {
 pub struct App {
     source_image: RgbaImage,
     base_texture: Option<egui::TextureHandle>,
+    /// Points of canvas per pixel of image. NOT a percentage: a zoom of 1.0 is
+    /// actual size only on a scale 1.0 display. See App::unit_zoom.
     zoom: f32,
+    /// While set, `zoom` and `pan` are recomputed from the canvas every frame
+    /// so the whole image stays visible. Cleared by any manual zoom.
+    fit_to_window: bool,
+    /// The zoom the user has asked for, as a fraction of actual size. The
+    /// persistent half of the zoom state; `zoom` is derived from it each frame
+    /// by refresh_zoom. Ignored while fit_to_window is set.
+    requested_scale: f32,
+    /// The display's scale factor, refreshed each frame. Cached because the
+    /// zoom helpers are called from places that have no Context to hand, and
+    /// because reading it in two places in one frame risks reading two
+    /// different values.
+    pixels_per_point: f32,
     pan: Vec2,
     canvas_rect: Rect,
     annotations: Vec<Annotation>,
@@ -150,6 +174,9 @@ impl App {
             source_image,
             base_texture: None,
             zoom: 1.0,
+            fit_to_window: config.general.zoom_to_fit,
+            requested_scale: 1.0,
+            pixels_per_point: 1.0,
             pan: Vec2::ZERO,
             canvas_rect: Rect::NOTHING,
             annotations: Vec::new(),
@@ -472,16 +499,101 @@ impl App {
         ctx.request_repaint();
     }
 
+    /// The `zoom` that shows the image at actual size -- one image pixel to one
+    /// physical display pixel. This is what "100%" means.
+    ///
+    /// It is not 1.0, and that was the zoom-in nobody asked for. `zoom`
+    /// multiplies POINTS, which is what the painter draws in, while the image
+    /// is measured in PIXELS; the window is sized image_pixels / scale points
+    /// (see apply_initial_window_size) precisely so the image fills it at
+    /// actual size. Drawing it at one point per pixel therefore magnified it
+    /// by the display's scale factor and overflowed the window it had just
+    /// been sized to fit -- on this display, 25% too big with the edges cut
+    /// off. At scale 1.0 the two units coincide and nothing looks wrong, which
+    /// is the "sometimes" in it.
+    fn unit_zoom(&self) -> f32 {
+        let ppp = self.pixels_per_point;
+        if ppp.is_finite() && ppp > 0.0 {
+            1.0 / ppp
+        } else {
+            1.0
+        }
+    }
+
+    /// Zoom that shows the whole image inside the canvas.
+    ///
+    /// Capped at actual size, so fitting only ever shrinks. A capture smaller
+    /// than the window stays at 100% rather than being blown up to fill it:
+    /// these are screenshots, and magnified pixels are not a better look at
+    /// them.
+    fn fit_zoom(&self) -> f32 {
+        let unit = self.unit_zoom();
+        let w = self.source_image.width() as f32;
+        let h = self.source_image.height() as f32;
+        if !self.canvas_rect.is_finite() || w <= 0.0 || h <= 0.0 {
+            return unit;
+        }
+        let avail = self.canvas_rect.size() - Vec2::splat(2.0 * FIT_MARGIN_POINTS);
+        if avail.x <= 0.0 || avail.y <= 0.0 {
+            return unit;
+        }
+        let fit = (avail.x / w).min(avail.y / h).min(unit);
+        self.clamp_zoom(fit)
+    }
+
+    /// Hold `zoom` between MIN_ZOOM_SCALE and MAX_ZOOM_SCALE of actual size.
+    fn clamp_zoom(&self, zoom: f32) -> f32 {
+        let unit = self.unit_zoom();
+        zoom.clamp(MIN_ZOOM_SCALE * unit, MAX_ZOOM_SCALE * unit)
+    }
+
+    /// `zoom` as a fraction of actual size -- 1.0 is 100%, which is what the
+    /// toolbar shows and what the limits are expressed in.
+    fn zoom_scale(&self) -> f32 {
+        self.zoom / self.unit_zoom()
+    }
+
+    /// Bring `zoom` into line with the scale factor and the window, once per
+    /// frame, before anything reads it.
+    ///
+    /// Both of its inputs move underneath it. The scale factor is a
+    /// placeholder 1.0 on the first frames and becomes real a frame or two
+    /// later (see apply_initial_window_size), and the window is resized
+    /// through startup and by hand afterwards. So the stored percentage is the
+    /// state that persists and `zoom` is derived from it every frame, rather
+    /// than `zoom` being set once from numbers that were not final.
+    fn refresh_zoom(&mut self) {
+        if self.fit_to_window {
+            self.zoom = self.fit_zoom();
+            // Nothing off-screen to pan to when the whole image is visible.
+            self.pan = Vec2::ZERO;
+        } else {
+            self.zoom = self.clamp_zoom(self.requested_scale * self.unit_zoom());
+        }
+    }
+
+    /// Show the image at actual size, centred.
+    fn reset_zoom(&mut self) {
+        self.fit_to_window = false;
+        self.requested_scale = 1.0;
+        self.zoom = self.unit_zoom();
+        self.pan = Vec2::ZERO;
+    }
+
     fn zoom_step(&mut self, factor: f32) {
+        // A deliberate zoom leaves fit mode: otherwise refresh_zoom would
+        // recompute the fitted zoom next frame and undo it.
+        self.fit_to_window = false;
         if self.canvas_rect.is_finite() {
             let center = self.canvas_rect.center();
             let img_pos = self.screen_to_image(center);
-            self.zoom = (self.zoom * factor).clamp(0.05, 50.0);
+            self.zoom = self.clamp_zoom(self.zoom * factor);
             let new_screen = self.image_to_screen(img_pos);
             self.pan += center.to_vec2() - new_screen.to_vec2();
         } else {
-            self.zoom = (self.zoom * factor).clamp(0.05, 50.0);
+            self.zoom = self.clamp_zoom(self.zoom * factor);
         }
+        self.requested_scale = self.zoom_scale();
     }
 
     fn copy_to_clipboard_action(&self) {
@@ -584,8 +696,13 @@ impl App {
                 Some(ctx.load_texture("base", color_img, egui::TextureOptions::LINEAR));
 
             self.crop_state = CropState::default();
-            self.zoom = 1.0;
+            // The image just changed size, so whatever the view was framing is
+            // gone either way: back to actual size, or refitted next frame.
             self.pan = Vec2::ZERO;
+            if !self.fit_to_window {
+                self.requested_scale = 1.0;
+                self.zoom = self.unit_zoom();
+            }
         }
     }
 
@@ -1012,10 +1129,8 @@ impl App {
                     match c {
                         '=' | '+' => self.zoom_step(zoom_factor),
                         '-' => self.zoom_step(1.0 / zoom_factor),
-                        '0' => {
-                            self.zoom = 1.0;
-                            self.pan = Vec2::ZERO;
-                        }
+                        '0' => self.reset_zoom(),
+                        'F' => self.fit_to_window = true,
                         '1'..='8' => {
                             let idx = (c as u8 - b'1') as usize;
                             let palette = self.config.palette_colors();
@@ -1264,8 +1379,9 @@ impl App {
                 .input(|i| i.pointer.hover_pos())
                 .unwrap_or(self.canvas_rect.center());
             let img_pos = self.screen_to_image(hover);
-            self.zoom *= factor;
-            self.zoom = self.zoom.clamp(0.05, 50.0);
+            self.fit_to_window = false;
+            self.zoom = self.clamp_zoom(self.zoom * factor);
+            self.requested_scale = self.zoom_scale();
             let new_screen = self.image_to_screen(img_pos);
             self.pan += hover.to_vec2() - new_screen.to_vec2();
         }
@@ -1397,6 +1513,20 @@ impl eframe::App for App {
             self.upload_base_texture(ctx);
             apply_theme(ctx, &self.config.theme);
         }
+
+        // Before anything reads `zoom`. Every zoom figure is relative to this,
+        // and on the first frames it is a placeholder 1.0 that the compositor
+        // replaces a frame or two later -- which is exactly why fit mode
+        // recomputes rather than deciding once.
+        let ppp = ctx.pixels_per_point();
+        if ppp.is_finite() && ppp > 0.0 {
+            self.pixels_per_point = ppp;
+        }
+        // Ahead of the toolbars, which print the zoom percentage: the canvas
+        // is not measured until the central panel runs, so fitting only there
+        // would leave the readout a frame behind. The central panel fits again
+        // against the fresh rect.
+        self.refresh_zoom();
 
         self.apply_initial_window_size(ctx);
 
@@ -1605,7 +1735,7 @@ impl eframe::App for App {
                     {
                         self.zoom_step(1.0 / zoom_factor);
                     }
-                    ui.label(format!("Zoom: {:.0}%", self.zoom * 100.0));
+                    ui.label(format!("Zoom: {:.0}%", self.zoom_scale() * 100.0));
                     if ui
                         .add_sized(
                             [22.0, 22.0],
@@ -1616,9 +1746,22 @@ impl eframe::App for App {
                     {
                         self.zoom_step(zoom_factor);
                     }
-                    if ui.button("Reset").on_hover_text("Reset Zoom (0)").clicked() {
-                        self.zoom = 1.0;
-                        self.pan = Vec2::ZERO;
+                    if ui.button("1:1").on_hover_text("Actual Size (0)").clicked() {
+                        self.reset_zoom();
+                    }
+                    let mut fit = self.fit_to_window;
+                    if ui
+                        .toggle_value(&mut fit, "Fit")
+                        .on_hover_text("Fit to Window (Shift+F)")
+                        .changed()
+                    {
+                        self.fit_to_window = fit;
+                        if !fit {
+                            // Leaving fit mode holds the zoom it was showing,
+                            // rather than jumping to whatever was asked for
+                            // before fit took over.
+                            self.requested_scale = self.zoom_scale();
+                        }
                     }
                     if ui
                         .add_sized(
@@ -1673,7 +1816,7 @@ impl eframe::App for App {
                 egui::ViewportId::from_hash_of("info_window"),
                 egui::ViewportBuilder::default()
                     .with_title("Keyboard Shortcuts")
-                    .with_inner_size([420.0, 595.0])
+                    .with_inner_size([420.0, 615.0])
                     .with_resizable(false)
                     .with_minimize_button(false)
                     .with_maximize_button(false),
@@ -1716,7 +1859,8 @@ impl eframe::App for App {
                                     row(ui, "Scroll wheel", "Zoom in / out (centered on cursor)");
                                     row(ui, "= / +", "Zoom in");
                                     row(ui, "-", "Zoom out");
-                                    row(ui, "0", "Reset zoom");
+                                    row(ui, "0", "Actual size (100%)");
+                                    row(ui, "Shift+F", "Fit image to window");
                                     row(ui, "Middle drag", "Pan");
                                     row(ui, "Pointer + drag", "Pan canvas");
                                     row(ui, "Pointer + drag annotation", "Move annotation");
@@ -1767,6 +1911,10 @@ impl eframe::App for App {
         let frame = egui::Frame::NONE.fill(Color32::from_rgb(30, 30, 35));
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             self.canvas_rect = ui.available_rect_before_wrap();
+            // Again, now that the canvas has been measured: the call before
+            // the panels was working from last frame's rect, which is a frame
+            // stale while the window is being resized.
+            self.refresh_zoom();
 
             let (response, painter) =
                 ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
