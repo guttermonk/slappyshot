@@ -1,8 +1,11 @@
 [package]
 name = "slappyshot"
-version = "0.21.0"
+version = "0.1.0"
 edition = "2024"
 description = "Screenshot annotation tool"
+license = "MPL-2.0"
+repository = "https://github.com/guttermonk/slappyshot"
+readme = "README.md"
 
 [[bin]]
 name = "slappyshot"
@@ -27,3 +30,62 @@ notosans  = "0.1"
 [build-dependencies]
 clap          = { version = "4", features = ["derive"] }
 clap_mangen   = "0.3"
+
+# Packaging metadata, read by cargo-deb and cargo-generate-rpm. See
+# .github/workflows/release.yml, which drives both.
+#
+# The dependency lists below are hand-written, and have to be. Nothing but
+# libc, libm and libgcc_s appears in the binary's DT_NEEDED -- wayland-sys is
+# built with its dlopen feature, and X11 and xkbcommon arrive through x11-dl
+# and xkbcommon-dl, which dlopen too. So the usual automatic dependency
+# discovery (dpkg-shlibdeps for deb, rpm's find-requires for rpm) sees a
+# program that needs nothing but a C library, and a package built on its word
+# installs perfectly and then dies at startup with no display and no GL.
+#
+# The manpage is not in the source tree: build.rs renders it into OUT_DIR,
+# whose directory name carries a build hash. The release workflow finds it and
+# stages it at the path below before either packager runs.
+
+[package.metadata.deb]
+maintainer = "guttermonk <guttermonk@protonmail.com>"
+copyright = "2026, guttermonk"
+license-file = ["LICENSE", "0"]
+section = "graphics"
+priority = "optional"
+# $auto keeps the libc6 dependency cargo-deb derives from the ELF, which is
+# what encodes the glibc floor of the machine this was built on.
+depends = "$auto, libegl1, libgl1, libxkbcommon0, libwayland-client0 | libx11-6"
+# Not depends: slappyshot annotates an image handed to it on stdin and does no
+# capturing of its own, so it runs without these -- they are just how anyone
+# on Wayland actually feeds it. See the example in `slappyshot --help`.
+recommends = "grim, slurp"
+extended-description = """
+Annotate a screenshot: crop it, draw on it, blur what should not be shared, \
+then save it or put it on the clipboard. Reads an image from a file or from \
+standard input, which is how it is usually reached -- with a region grabber \
+piping into it."""
+assets = [
+    ["target/release/slappyshot", "usr/bin/", "755"],
+    ["slappyshot.desktop", "usr/share/applications/", "644"],
+    ["assets/slappyshot.png", "usr/share/icons/hicolor/256x256/apps/slappyshot.png", "644"],
+    ["target/dist/man/slappyshot.1", "usr/share/man/man1/", "644"],
+    ["README.md", "usr/share/doc/slappyshot/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/slappyshot", dest = "/usr/bin/slappyshot", mode = "755" },
+    { source = "slappyshot.desktop", dest = "/usr/share/applications/slappyshot.desktop", mode = "644" },
+    { source = "assets/slappyshot.png", dest = "/usr/share/icons/hicolor/256x256/apps/slappyshot.png", mode = "644" },
+    { source = "target/dist/man/slappyshot.1", dest = "/usr/share/man/man1/slappyshot.1", mode = "644", doc = true },
+    { source = "README.md", dest = "/usr/share/doc/slappyshot/README.md", mode = "644", doc = true },
+    { source = "LICENSE", dest = "/usr/share/licenses/slappyshot/LICENSE", mode = "644", doc = true },
+]
+
+# Written as sonames rather than package names because those differ across the
+# rpm distributions (mesa-libEGL on Fedora, libEGL1 on openSUSE) while the
+# library filename does not.
+[package.metadata.generate-rpm.requires]
+"libEGL.so.1()(64bit)" = "*"
+"libGL.so.1()(64bit)" = "*"
+"libxkbcommon.so.0()(64bit)" = "*"

@@ -4,58 +4,205 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+  # So the whole thing can be exercised without tagging. That matters here:
+  # tags in this repository are signed by a hardware key, so tagging is not
+  # something to do speculatively to find out whether the packaging works. A
+  # dispatch run builds every package and uploads them as workflow artifacts
+  # without creating a release.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+  # Used for naming only. The build is native -- see the build step.
+  TARGET: x86_64-unknown-linux-gnu
+
+permissions:
+  contents: read
 
 jobs:
   release:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            archive: tar.gz
-
-    runs-on: ${{ matrix.os }}
+    # Deliberately not ubuntu-latest. Nothing but libc, libm and libgcc_s is
+    # linked -- wayland-sys is built with its dlopen feature, and X11 and
+    # xkbcommon arrive through x11-dl and xkbcommon-dl, which dlopen too -- so
+    # the glibc of the build machine is the only thing deciding where these
+    # packages can run. ubuntu-latest is 24.04 and glibc 2.39, which would
+    # leave out Debian 12 (2.36) and Ubuntu 22.04 itself (2.35) for no gain.
+    runs-on: ubuntu-22.04
 
     permissions:
       contents: write
 
     steps:
-      # No system libraries to install: wayland-sys is built with its dlopen
-      # feature, and X11 and xkbcommon arrive through x11-dl and xkbcommon-dl,
-      # which dlopen too. Nothing links against a -dev package at build time.
+      # No system libraries to install, for the dlopen reasons above: nothing
+      # links against a -dev package at build time.
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
         with:
-          targets: ${{ matrix.target }}
+          tool: cargo-deb
 
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@v2
+      # Not install-action: cargo-generate-rpm is not among the tools it
+      # carries. rust-cache keeps ~/.cargo/bin, so this is only slow once.
+      - name: Install cargo-generate-rpm
+        run: cargo install --locked cargo-generate-rpm
 
-      - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
-
-      - name: Pack Artifacts
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          RELEASE_NAME: slappyshot-${{ matrix.target }}
-          ARTIFACTS_DIR: target/${{ matrix.target }}/release
+      - name: Resolve the version
+        id: version
         run: |
-          mkdir $RELEASE_NAME
-          cp target/${{ matrix.target }}/release/slappyshot -t $RELEASE_NAME
-          # The manpage build.rs renders into OUT_DIR; its directory name
-          # carries a build hash, so it has to be found rather than named.
-          install -Dm644 "$(find target -name slappyshot.1 | head -1)" \
-            $RELEASE_NAME/man/slappyshot.1
-          cp -r README.md assets LICENSE slappyshot.desktop -t $RELEASE_NAME
-          tar -zcvf $RELEASE_NAME.${{ matrix.archive }} -C $RELEASE_NAME .
+          cargo_version="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[0].version')"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            # A tag disagreeing with Cargo.toml would ship packages whose
+            # filenames and recorded versions differ, and the version lives in
+            # two places by hand (Cargo.toml and flake.nix). Fail loudly here
+            # rather than publish that.
+            if [ "$tag_version" != "$cargo_version" ]; then
+              echo "::error::tag v${tag_version} does not match Cargo.toml version ${cargo_version}"
+              exit 1
+            fi
+          fi
+          echo "version=${cargo_version}" >> "$GITHUB_OUTPUT"
+          echo "name=slappyshot-${cargo_version}-${TARGET}" >> "$GITHUB_OUTPUT"
 
+      # Native, so the binary lands at the plain target/release/slappyshot that
+      # the asset paths in Cargo.toml name. Building --target x86_64-unknown-
+      # linux-gnu instead would put it under target/<triple>/release and leave
+      # both packagers looking in the wrong place.
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Stage the manpage
+        run: |
+          # build.rs renders the page into OUT_DIR, whose directory name
+          # carries a build hash, so it has to be found rather than named --
+          # the same dance flake.nix and the Makefile do. Deliberately not
+          # guarded with `|| true`: every package below lists this path, and a
+          # silent skip would ship them all with `man slappyshot` empty.
+          mkdir -p target/dist/man
+          cp "$(find target -name slappyshot.1 | head -1)" target/dist/man/slappyshot.1
+
+      - name: Tarball
+        env:
+          NAME: ${{ steps.version.outputs.name }}
+        run: |
+          # Staged under target/ rather than the repository root so that
+          # running any of this by hand does not leave untracked directories
+          # next to the source.
+          stage="target/pkg/${NAME}"
+          rm -rf "$stage" && mkdir -p "$stage"
+          cp target/release/slappyshot -t "$stage"
+          install -Dm644 target/dist/man/slappyshot.1 "$stage/man/slappyshot.1"
+          cp -r README.md LICENSE assets slappyshot.desktop -t "$stage"
+          tar -zcf "target/dist/${NAME}.tar.gz" -C "$stage" .
+
+      - name: Debian package
+        env:
+          NAME: ${{ steps.version.outputs.name }}
+        run: cargo deb --no-build --output "target/dist/${NAME}.deb"
+
+      - name: RPM package
+        env:
+          NAME: ${{ steps.version.outputs.name }}
+        run: cargo generate-rpm --output "target/dist/${NAME}.rpm"
+
+      - name: AppImage
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCH: x86_64
+          # The runners have no FUSE, so appimagetool cannot mount itself.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          appdir=target/AppDir
+          install -Dm755 target/release/slappyshot "$appdir/usr/bin/slappyshot"
+          install -Dm644 slappyshot.desktop \
+            "$appdir/usr/share/applications/slappyshot.desktop"
+          install -Dm644 assets/slappyshot.png \
+            "$appdir/usr/share/icons/hicolor/256x256/apps/slappyshot.png"
+          install -Dm644 target/dist/man/slappyshot.1 \
+            "$appdir/usr/share/man/man1/slappyshot.1"
+
+          # appimagetool wants the desktop file and the icon at the top of the
+          # AppDir as well, and reads .DirIcon for the thumbnail.
+          ln -sf usr/share/applications/slappyshot.desktop "$appdir/slappyshot.desktop"
+          ln -sf usr/share/icons/hicolor/256x256/apps/slappyshot.png "$appdir/slappyshot.png"
+          ln -sf slappyshot.png "$appdir/.DirIcon"
+
+          # Hand-written rather than linuxdeploy's, because there is nothing to
+          # bundle: the libraries this program actually uses are dlopened and
+          # have to come from the host regardless. Shipping a GL or Wayland
+          # stack inside the image is how AppImages break on other people's
+          # drivers. `exec` is not incidental -- slappyshot is normally handed
+          # its capture on stdin, and a wrapper that does not exec would sit
+          # between the pipe and the program.
+          # Single-quoted so that $HERE, $0 and $@ reach the generated script
+          # rather than being expanded while generating it, which is the whole
+          # point of writing it this way.
+          # shellcheck disable=SC2016
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'HERE="$(dirname "$(readlink -f "$0")")"' \
+            'exec "$HERE/usr/bin/slappyshot" "$@"' > "$appdir/AppRun"
+          chmod +x "$appdir/AppRun"
+
+          curl -fsSLo appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ./appimagetool "$appdir" "target/dist/slappyshot-${VERSION}-${ARCH}.AppImage"
+
+      # Cheap, and the failure it catches is the expensive one: a package that
+      # installs and then cannot start. The grep asserts the hand-written
+      # dependencies from Cargo.toml actually made it into the control file,
+      # because the automatic discovery would have found only libc.
+      - name: Inspect the packages
+        run: |
+          dpkg-deb --info target/dist/*.deb
+          dpkg-deb --contents target/dist/*.deb
+          # The assertion that matters. dpkg-shlibdeps sees a program needing
+          # only a C library, so if the hand-written list in Cargo.toml ever
+          # goes missing the package still builds -- and then fails to start
+          # on a machine without a GL stack. Unguarded on purpose.
+          dpkg-deb --field target/dist/*.deb Depends | grep -q libegl1
+          # These two are only for the log, and neither tool is promised by the
+          # runner image, so their absence must not fail the release.
+          if command -v desktop-file-validate >/dev/null; then
+            desktop-file-validate slappyshot.desktop
+          fi
+          if command -v rpm >/dev/null; then
+            rpm -qpi target/dist/*.rpm
+            rpm -qpR target/dist/*.rpm
+          fi
+          ls -l target/dist
+
+      - name: Checksums
+        run: |
+          cd target/dist
+          sha256sum ./*.tar.gz ./*.deb ./*.rpm ./*.AppImage > SHA256SUMS
+          cat SHA256SUMS
+
+      # Draft, so there is a chance to look at the artifacts and write the
+      # notes before any of it is public. Publishing stays a manual step.
       - name: Release
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v3
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: slappyshot-${{ matrix.target }}.${{ matrix.archive }}
+          draft: true
+          generate_release_notes: true
+          files: |
+            target/dist/*.tar.gz
+            target/dist/*.deb
+            target/dist/*.rpm
+            target/dist/*.AppImage
+            target/dist/SHA256SUMS
 
+      - name: Upload packages (dispatch runs)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: slappyshot-packages
+          path: target/dist/*
+          if-no-files-found: error
