@@ -1,8 +1,11 @@
 # slappyshot
+"You miss 100% of the screenshots you don't annotate using slappyshot." - Wayne Gretzky
+
+![slappyshot with a capture open, the tool strip above it and the size, fill, colour and zoom controls below](assets/screenshot.png)
 
 A fast, toolkit-independent screenshot annotation tool. Pipe in a screenshot, annotate it, copy or save. Built on [egui](https://github.com/emilk/egui)/[eframe](https://github.com/emilk/egui/tree/master/crates/eframe) — no GTK required.
 
-"You miss 100% of the screenshots you don't take using slappyshot." - Wayne Gretzky
+
 
 ## Installation
 
@@ -120,11 +123,15 @@ Tool shortcuts are configurable via `[keybinds]` in the config file.
 ### Style
 | Shortcut | Action |
 |----------|--------|
-| `1` – `6` | Select palette color 1–6 |
-| `7` | Small size |
-| `8` | Medium size |
-| `9` | Large size |
+| `1` – `8` | Select palette color 1–8 |
+| `Shift+S` | Small size |
+| `Shift+M` | Medium size |
+| `Shift+L` | Large size |
+| `[` / `]` | Cycle size down / up |
 | `f` | Toggle fill |
+
+The tool, size and color you pick are remembered for the next run — see
+[Remembered selection](#remembered-selection).
 
 ### Actions
 | Shortcut | Action |
@@ -171,22 +178,38 @@ Options:
       --early-exit                        Exit after copy/save
       --auto-copy                         Auto-copy to clipboard after each annotation change
       --no-zoom-to-fit                    Open at 100% instead of fitting the image to the window
+      --no-remember                       Ignore the remembered tool, size and colour, and do not update them
   -h, --help                              Print help
   -V, --version                           Print version
 ```
 
+## Remembered selection
+
+The tool, size and colour you last used are carried over to the next capture,
+so a session spent drawing red arrows opens on a red arrow rather than back at
+the defaults. They are kept in `~/.local/state/slappyshot/state.toml` (or
+`$XDG_STATE_HOME`), which is the program's own file and safe to delete.
+
+`initial_tool` is the starting point rather than an override: it applies until
+there is something remembered, and `--initial-tool` wins over both for the run
+it is given on. Set `remember_last_used = false`, or pass `--no-remember`, to
+turn the whole thing off. A remembered colour that is no longer in your palette
+is dropped, so editing `color_palette` does not leave you drawing in a colour
+the toolbar cannot show.
+
 ## Configuration
 
-Config file location: `~/.config/slappyshot/config.toml`
+Config file location: `~/.config/slappyshot/config.toml`. A commented sample
+listing every setting at its default is in [`config.toml`](config.toml) at the
+root of this repository.
+
+Keys are snake_case, and one spelled any other way is ignored in silence rather
+than refused — if a setting appears to do nothing, check its spelling first.
 
 ```toml
 [general]
 # Start fullscreen
 fullscreen = false
-# Exit after copy/save
-early_exit = false
-# Auto-copy after every annotation change
-auto_copy = false
 # Output filename template (chrono format specifiers supported)
 output_filename = "/tmp/slappyshot-%Y-%m-%d_%H:%M:%S.png"
 # Save to file after copying
@@ -197,8 +220,11 @@ default_hide_toolbars = false
 default_fill_shapes = false
 # Corner roundness for rectangles (0 = sharp corners)
 corner_roundness = 12
-# Initial tool on startup
+# Initial tool on startup. Only until there is a remembered one -- see
+# remember_last_used below.
 initial_tool = "arrow"
+# Carry the tool, size and colour over from the last run
+remember_last_used = true
 # Command to run on copy (e.g. "wl-copy"). Falls back to native clipboard if unset.
 copy_command = "wl-copy"
 # Scale factor for annotation sizes
@@ -216,7 +242,7 @@ zoom_to_fit = true
 pan_step_size = 50.0
 # Disable window decorations
 no_window_decoration = false
-# Actions on Enter key [save_to_clipboard, save_to_file, copy_filepath_to_clipboard, exit]
+# Actions on Enter key [save_to_clipboard, save_to_file, exit]
 actions_on_enter = ["save_to_clipboard", "exit"]
 # Actions on Escape key
 actions_on_escape = ["exit"]
@@ -248,6 +274,16 @@ text_color   = "#ffffff"
 button_fill  = "#2a2a2f"
 button_active = "#f0932b"
 ```
+
+### Accepted and ignored
+
+These parse without complaint and then do nothing: `floating_hack`,
+`early_exit`, `auto_copy` and `disable_notifications` under `[general]`, the
+whole `[font]` section, and the `--early-exit` and `--auto-copy` flags. Text
+annotations use the system font egui resolves for itself.
+
+Two action names are the same story: `copy_filepath_to_clipboard` does nothing,
+and `save_to_file_as` is an alias for `save_to_file` rather than a dialog.
 
 ## Build from Source
 

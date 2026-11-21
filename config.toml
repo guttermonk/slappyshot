@@ -1,88 +1,132 @@
+# slappyshot sample configuration.
+#
+# Copy to ~/.config/slappyshot/config.toml (or $XDG_CONFIG_HOME/slappyshot/),
+# or point at it with --config. Every setting below is optional and shown at
+# its default, so copying this file as it stands changes nothing -- except
+# copy-command and output-filename, which have no default and are commented
+# out.
+#
+# Keys are snake_case, and a key spelled any other way is ignored in silence
+# rather than refused. If a setting appears to do nothing, check its spelling
+# here first.
+
 [general]
-# Start Satty in fullscreen mode
-fullscreen = true
-# Exit directly after copy/save action
-early-exit = true
-# Draw corners of rectangles round if the value is greater than 0 (0 disables rounded corners)
-corner-roundness = 12
-# Select the tool on startup [possible values: pointer, crop, line, arrow, rectangle, text, marker, blur, brush]
-initial-tool = "brush"
-# Configure the command to be called on copy, for example `wl-copy`
-copy-command = "wl-copy"
-# Increase or decrease the size of the annotations
-annotation-size-factor = 2
-# Filename to use for saving action. Omit to disable saving to file. Might contain format specifiers: https://docs.rs/chrono/latest/chrono/format/strftime/index.html
-output-filename = "/tmp/test-%Y-%m-%d_%H:%M:%S.png"
-# After copying the screenshot, save it to a file as well
-save-after-copy = false
-# Hide toolbars by default
-default-hide-toolbars = false
-# Experimental: whether window focus shows/hides toolbars. This does not affect initial state of toolbars, see default-hide-toolbars.
-focus-toggles-toolbars = false
-# Fill shapes by default
-default-fill-shapes = false
-# The primary highlighter to use, the other is accessible by holding CTRL at the start of a highlight [possible values: block, freehand]
-primary-highlighter = "block"
-# Disable notifications
-disable-notifications = false
-# Actions to trigger on right click (order is important)
-# [possible values: save-to-clipboard, save-to-file, exit]
-actions-on-right-click = []
-# Actions to trigger on Enter key (order is important)
-# [possible values: save-to-clipboard, save-to-file, exit]
-actions-on-enter = ["save-to-clipboard"]
-# Actions to trigger on Escape key (order is important)
-# [possible values: save-to-clipboard, save-to-file, exit]
-actions-on-escape = ["exit"]
-# Action to perform when the Enter key is pressed [possible values: save-to-clipboard, save-to-file]
-# Deprecated: use actions-on-enter instead
-action-on-enter = "save-to-clipboard"
-# Right click to copy
-# Deprecated: use actions-on-right-click instead
-right-click-copy = false
-# request no window decoration. Please note that the compositor has the final say in this. At this point. requires xdg-decoration-unstable-v1.
-no-window-decoration = true
-# experimental feature: adjust history size for brush input smoothing (0: disabled, default: 0, try e.g. 5 or 10)
-brush-smooth-history-size = 10
 
-# Tool selection keyboard shortcuts
-[keybinds]
-pointer = "p"
-crop = "c"
-brush = "b"
-line = "i"
-arrow = "z"
-rectangle = "r"
-ellipse = "e"
-text = "t"
-marker = "m"
-blur = "u"
-highlight = "g"
+# --- Window
 
-# Font to use for text annotations
-[font]
-family = "Roboto"
-style = "Regular"
+# Start fullscreen.
+fullscreen = false
+# Ask the compositor for a window with no titlebar or border. It has the final
+# say, and on Wayland this needs xdg-decoration-unstable-v1.
+no_window_decoration = false
+# Hide both toolbars on startup. Ctrl+T toggles them at any time.
+default_hide_toolbars = false
 
-# Custom colours for the colour palette
-[color-palette]
-# These will be shown in the toolbar for quick selection
+# --- What opens, and what is remembered
+
+# The tool selected on startup, until there is a remembered one -- see
+# remember_last_used below. [pointer, crop, brush, line, arrow, rectangle,
+# ellipse, text, marker, blur, highlight, delete]
+initial_tool = "arrow"
+# Carry the tool, size and colour over from the last run, so a session spent
+# drawing red arrows opens on a red arrow. Kept in
+# ~/.local/state/slappyshot/state.toml, which is safe to delete.
+remember_last_used = true
+# Fill shapes by default. `f` toggles it.
+default_fill_shapes = false
+# The highlighter reached for first; the other one is available by holding
+# Ctrl as a highlight starts. [block, freehand]
+primary_highlighter = "block"
+
+# --- Drawing
+
+# Corner radius for rectangles, in pixels. 0 for square corners.
+corner_roundness = 12
+# Scale every annotation up or down: line widths, arrowheads, text, markers.
+annotation_size_factor = 1.0
+# Smoothing applied to freehand brush strokes, as a number of points of
+# history. 0 disables it.
+brush_smooth_history_size = 5
+
+# --- Zoom and pan
+
+# Fit the image to the window on startup. Only ever scales down: a capture
+# smaller than the window is shown at 100% rather than magnified.
+zoom_to_fit = true
+# How far one scroll tick or one press of +/- moves the zoom.
+zoom_factor = 1.1
+# How far an arrow key pans, in pixels. Panning needs the Pointer tool.
+pan_step_size = 50.0
+
+# --- Output
+
+# Where "save" writes, with chrono format specifiers expanded:
+# https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+# Unset means /tmp/slappyshot-<timestamp>.png.
+# output_filename = "~/Pictures/slappyshot-%Y-%m-%d_%H:%M:%S.png"
+
+# A command to pipe the PNG into on copy, e.g. wl-copy. Unset uses the built-in
+# clipboard, which speaks both Wayland and X11.
+# copy_command = "wl-copy"
+
+# Also write the file every time the image is copied.
+save_after_copy = false
+
+# --- Actions
+#
+# Run in the order given. [save_to_clipboard, save_to_file, exit]
+
+actions_on_enter = ["save_to_clipboard", "exit"]
+actions_on_escape = ["exit"]
+actions_on_right_click = []
+
+# Hex colours offered in the bottom toolbar. The first is selected on a fresh
+# start, and the first eight answer to the number keys 1-8.
+[color_palette]
 palette = [
-    "#00ffff",
-    "#a52a2a",
-    "#dc143c",
-    "#ff1493",
-    "#ffd700",
-    "#008000"
+    "#f0932b",
+    "#eb4d4b",
+    "#6ab04c",
+    "#22a6b3",
+    "#130f40",
+    "#c825b8",
+    "#ffffff",
+    "#000000",
 ]
 
-# These will be available in the color picker as presets
-# Leave empty to use GTK's default
-custom = [
-    "#00ffff",
-    "#a52a2a",
-    "#dc143c",
-    "#ff1493",
-    "#ffd700",
-    "#008000"
-]
+# One key per tool. Shown below at their defaults; only the ones you change
+# need to be listed.
+[keybinds]
+pointer   = "p"
+crop      = "x"
+brush     = "b"
+line      = "l"
+arrow     = "a"
+rectangle = "r"
+ellipse   = "e"
+text      = "t"
+marker    = "m"
+blur      = "w"
+highlight = "h"
+delete    = "d"
+
+# Hex colours for the toolbars themselves. Each is optional, and anything left
+# out keeps egui's dark theme.
+[theme]
+panel_fill    = "#1e1e23"
+text_color    = "#ffffff"
+button_fill   = "#2a2a2f"
+button_active = "#f0932b"
+
+# --- Accepted and ignored
+#
+# These parse without complaint and then do nothing. They are listed here so
+# that nobody spends an afternoon wondering why, and left out above so that
+# nobody copies them expecting an effect:
+#
+#   [general] floating_hack, early_exit, auto_copy, disable_notifications
+#   [font]    family, style, fallback
+#
+# The two command line flags --early-exit and --auto-copy are the same story.
+# Text annotations use the system font egui resolves for itself; [font] is not
+# consulted.

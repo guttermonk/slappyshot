@@ -5,6 +5,7 @@ use std::time::Instant;
 use crate::config::{Action, Config, apply_theme};
 use crate::render::{compute_blur_pixels, copy_to_clipboard, render_to_image};
 use crate::screen::Screen;
+use crate::state::LastUsed;
 use crate::style::{Color, Size, Style};
 use crate::tools::{
     ActiveDrawing, Annotation, CropRect, CropState, HighlightAnnotation, HighlighterKind, Smoother,
@@ -153,22 +154,47 @@ pub struct App {
     /// window from a measurement, which is the only moment the size can be
     /// set at all -- see apply_initial_window_size.
     screen: Option<Screen>,
+    /// The selection as last written to the state file, so remember_style can
+    /// tell a real change from a frame in which nothing moved.
+    remembered: LastUsed,
 }
 
 impl App {
-    pub fn new(source_image: RgbaImage, config: Config, screen: Option<Screen>) -> Self {
+    pub fn new(
+        source_image: RgbaImage,
+        config: Config,
+        screen: Option<Screen>,
+        last_used: LastUsed,
+    ) -> Self {
+        let palette = config.palette_colors();
         let style = Style {
-            color: {
-                let palette = config.palette_colors();
-                let &(r, g, b, a) = palette.first().unwrap_or(&(240, 147, 43, 255));
-                Color { r, g, b, a }
-            },
-            size: Size::Medium,
+            // The remembered colour is honoured only while it is still one of
+            // the palette's, because the palette is what the toolbar can show
+            // as selected: a colour outside it would draw with no swatch lit,
+            // which reads as a bug. A changed palette therefore quietly
+            // reverts to its first entry.
+            color: last_used
+                .color
+                .as_deref()
+                .and_then(Color::from_hex)
+                .filter(|c| palette.contains(&(c.r, c.g, c.b, c.a)))
+                .unwrap_or_else(|| {
+                    let &(r, g, b, a) = palette.first().unwrap_or(&(240, 147, 43, 255));
+                    Color { r, g, b, a }
+                }),
+            size: last_used.size.unwrap_or_default(),
             fill: config.general.default_fill_shapes,
             annotation_size_factor: config.general.annotation_size_factor,
         };
 
-        let initial_tool = tool_from_string(&config.general.initial_tool).unwrap_or_default();
+        // Remembered over configured, and configured over the built-in arrow.
+        // `initial_tool` is the seed and not the override: a config that names
+        // a tool is saying where to start, and main.rs has already dropped the
+        // remembered one if the command line asked for something specific.
+        let initial_tool = last_used
+            .tool
+            .or_else(|| tool_from_string(&config.general.initial_tool))
+            .unwrap_or_default();
 
         let primary_highlighter = if config.general.primary_highlighter == "freehand" {
             HighlighterKind::Freehand
@@ -214,6 +240,30 @@ impl App {
             key_flash: None,
             show_info: false,
             screen,
+            // What was resolved above, not what was read: anything the state
+            // file could not supply or no longer applies has been replaced by
+            // a default here, and the file should converge on that rather than
+            // keep offering it.
+            remembered: LastUsed::of(initial_tool, style.size, style.color),
+        }
+    }
+
+    /// Write the tool, size and colour out when they change, so the next run
+    /// opens with them.
+    ///
+    /// Compared once at the end of a frame rather than saved from each of the
+    /// places that can change one -- two toolbars, the number keys, S/M/L,
+    /// `[`, `]` -- because a comparison cannot be forgotten by whoever adds
+    /// the next tool button. The write only happens on an actual change, so
+    /// this costs one struct comparison per frame and nothing else.
+    fn remember_style(&mut self) {
+        if !self.config.general.remember_last_used {
+            return;
+        }
+        let current = LastUsed::of(self.active_tool, self.style.size, self.style.color);
+        if current != self.remembered {
+            current.save();
+            self.remembered = current;
         }
     }
 
@@ -2057,6 +2107,10 @@ impl eframe::App for App {
         if self.config.general.auto_copy && self.annotations.is_empty() {
             // don't auto-copy on empty - it will be triggered after annotation
         }
+
+        // Last, so it sees everything this frame's keyboard handling and
+        // toolbars did.
+        self.remember_style();
     }
 }
 

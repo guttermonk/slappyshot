@@ -44,9 +44,36 @@ impl Color {
     pub fn to_egui(self) -> Color32 {
         Color32::from_rgba_unmultiplied(self.r, self.g, self.b, self.a)
     }
+
+    /// Parse `#rrggbb` or `#rrggbbaa`, as the palette and theme settings are
+    /// written. Used for the remembered colour in state.toml, which is stored
+    /// in the same spelling the user would write in config.toml.
+    pub fn from_hex(s: &str) -> Option<Self> {
+        // to_srgba_unmultiplied and not to_array: Color32 stores its channels
+        // premultiplied, so reading them back raw darkens anything with an
+        // alpha below 255.
+        let [r, g, b, a] = crate::config::parse_hex_color(s)?.to_srgba_unmultiplied();
+        Some(Self::new(r, g, b, a))
+    }
+
+    pub fn to_hex(self) -> String {
+        format!("#{:02x}{:02x}{:02x}{:02x}", self.r, self.g, self.b, self.a)
+    }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default)]
+#[derive(
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum Size {
     Small = 0,
     #[default]

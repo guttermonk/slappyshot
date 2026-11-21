@@ -62,6 +62,8 @@ pub struct GeneralConfig {
     pub no_window_decoration: bool,
     #[serde(default)]
     pub disable_notifications: bool,
+    #[serde(default = "default_remember_last_used")]
+    pub remember_last_used: bool,
 }
 
 fn default_corner_roundness() -> f32 {
@@ -101,6 +103,16 @@ fn default_zoom_to_fit() -> bool {
 fn default_pan_step_size() -> f32 {
     50.0
 }
+/// Carry the tool, size and colour over from the last run.
+///
+/// On by default because the alternative is reselecting the same three things
+/// on every capture: annotating is a habit, and a tool someone reaches for
+/// once they reach for all afternoon. `initial_tool` is still honoured -- it
+/// is what the first run starts from, before there is anything to remember --
+/// and the remembered selection takes over from there. See state.rs.
+fn default_remember_last_used() -> bool {
+    true
+}
 
 impl Default for GeneralConfig {
     fn default() -> Self {
@@ -127,6 +139,7 @@ impl Default for GeneralConfig {
             pan_step_size: default_pan_step_size(),
             no_window_decoration: false,
             disable_notifications: false,
+            remember_last_used: default_remember_last_used(),
         }
     }
 }

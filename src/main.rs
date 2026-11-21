@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod render;
 mod screen;
+mod state;
 mod style;
 mod tools;
 
@@ -13,6 +14,7 @@ use clap::Parser;
 use app::App;
 use cli::Args;
 use config::Config;
+use state::LastUsed;
 
 fn load_icon() -> Option<std::sync::Arc<egui::IconData>> {
     let bytes = include_bytes!("../assets/slappyshot.png");
@@ -51,8 +53,12 @@ fn main() -> anyhow::Result<()> {
     if let Some(v) = args.annotation_size_factor {
         config.general.annotation_size_factor = v;
     }
+    let tool_from_cli = args.initial_tool.is_some();
     if let Some(v) = args.initial_tool {
         config.general.initial_tool = v;
+    }
+    if args.no_remember {
+        config.general.remember_last_used = false;
     }
     if args.fullscreen {
         config.general.fullscreen = true;
@@ -65,6 +71,21 @@ fn main() -> anyhow::Result<()> {
     }
     if args.no_zoom_to_fit {
         config.general.zoom_to_fit = false;
+    }
+
+    // The tool, size and colour from the last run. Loaded here with the rest
+    // of the precedence so there is one place to read the whole order off:
+    // the command line beats what was remembered, and what was remembered
+    // beats the config file's initial_tool -- which is the first run's seed
+    // rather than a standing instruction. --no-remember opts out of both
+    // halves, reading nothing and writing nothing.
+    let mut last_used = if config.general.remember_last_used {
+        LastUsed::load()
+    } else {
+        LastUsed::default()
+    };
+    if tool_from_cli {
+        last_used.tool = None;
     }
 
     let image = match load_image(args.filename.as_deref()) {
@@ -158,7 +179,7 @@ fn main() -> anyhow::Result<()> {
     // Handed on so App knows whether the size above was measured or guessed.
     // Its own sizing pass is the correction for a guess and has nothing to add
     // to a measurement.
-    let app = App::new(image, config, screen);
+    let app = App::new(image, config, screen, last_used);
 
     eframe::run_native(
         "slappyshot",

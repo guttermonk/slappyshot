@@ -64,4 +64,8 @@ pub struct Args {
     /// Open at 100% instead of fitting the image to the window
     #[arg(long)]
     pub no_zoom_to_fit: bool,
+
+    /// Ignore the remembered tool, size and colour, and do not update them
+    #[arg(long)]
+    pub no_remember: bool,
 }
