@@ -32,6 +32,11 @@ jobs:
     permissions:
       contents: write
 
+    # Read by the arch job below, which cannot see this one's step outputs.
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      name: ${{ steps.version.outputs.name }}
+
     steps:
       # No system libraries to install, for the dlopen reasons above: nothing
       # links against a -dev package at build time.
@@ -239,10 +244,99 @@ jobs:
             target/dist/PKGBUILD
             target/dist/SHA256SUMS
 
-      - name: Upload packages (dispatch runs)
-        if: github.ref_type != 'tag'
+      # Unconditional, where this used to be dispatch-only: the arch job below
+      # needs the tarball and the PKGBUILD on a tag run too, and an artifact is
+      # the only way to hand files to a job in a different container.
+      - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
           name: slappyshot-packages
           path: target/dist/*
+          if-no-files-found: error
+
+  # The PKGBUILD had never been near makepkg -- it was reasoned about, and its
+  # package() run by hand against a tarball, which is not the same thing. This
+  # job is the proof, and it is also the only place .SRCINFO can come from: the
+  # AUR will not accept a push without one, and only makepkg writes it.
+  arch:
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+
+    permissions:
+      contents: write
+
+    steps:
+      # The three runtime libraries are installed because makepkg checks
+      # depends before it builds and stops if any is missing. base-devel
+      # already carries fakeroot, binutils and the rest of what it needs.
+      - name: Tools
+        run: |
+          pacman -Syu --noconfirm --needed namcap github-cli \
+            libglvnd libxkbcommon wayland
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: slappyshot-packages
+          path: dist
+
+      - name: Build the package
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          NAME: ${{ needs.release.outputs.name }}
+        run: |
+          mkdir -p build
+          cp dist/PKGBUILD build/
+
+          # source= points at a release asset, which does not exist yet on a
+          # tag run and never will on a dispatch one. makepkg uses a file
+          # already sitting beside the PKGBUILD under the name the `::` rename
+          # gives it rather than fetching, so this both avoids the download
+          # and makes the build check the rendered sha256sums against the very
+          # tarball this run produced -- the one thing the sed could get wrong
+          # that a surviving-token check would not catch.
+          cp "dist/${NAME}.tar.gz" "build/slappyshot-${VERSION}.tar.gz"
+
+          # makepkg refuses to run as root and a container is root.
+          useradd -m builder
+          chown -R builder:builder build
+
+          su builder -c 'cd build && makepkg --printsrcinfo > .SRCINFO'
+          su builder -c 'cd build && makepkg -f --noconfirm'
+          ls -l build
+
+      - name: Inspect the package
+        run: |
+          pkg="$(ls build/*.pkg.tar.zst)"
+          bsdtar -tf "$pkg" | sort
+          # The same assertion the deb and rpm get: a package that installs
+          # and then has no program in it is the failure worth catching.
+          bsdtar -tf "$pkg" | grep -qx 'usr/bin/slappyshot'
+          bsdtar -tf "$pkg" | grep -qx 'usr/share/man/man1/slappyshot.1'
+          cat build/.SRCINFO
+
+          # For the log and not a gate. namcap reads DT_NEEDED like every
+          # other dependency checker, so it sees a program that needs libc and
+          # calls libglvnd, libxkbcommon and wayland unnecessary. That blind
+          # spot is exactly why the lists are hand-written; failing on it would
+          # mean deleting the dependencies that make the package work.
+          namcap build/PKGBUILD || true
+          namcap "$pkg" || true
+
+      # Beside the PKGBUILD it belongs to, so publishing to the AUR is a
+      # download of two files rather than a build on somebody's machine.
+      - name: Attach .SRCINFO to the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" build/.SRCINFO \
+            --clobber --repo "$GITHUB_REPOSITORY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slappyshot-aur
+          path: |
+            build/PKGBUILD
+            build/.SRCINFO
           if-no-files-found: error

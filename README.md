@@ -14,13 +14,22 @@ them against. All of them are x86_64.
 
 ### Arch Linux
 
+There is no AUR package — see below if you would like to maintain one. Until
+there is, the `PKGBUILD` attached to each release installs the released binary:
+
 ```sh
 curl -fsSLO https://github.com/guttermonk/slappyshot/releases/latest/download/PKGBUILD
 makepkg -si
 ```
 
-That builds `slappyshot-bin` from the release tarball. The template it is
-rendered from is in [`packaging/aur/`](packaging/aur/).
+That gives you `slappyshot-bin`, but it will not upgrade along with the rest of
+your system, which is the part only the AUR can provide.
+
+**Packagers welcome.** Every release carries that `PKGBUILD` and a matching
+`.SRCINFO`, both rendered, built and checked in an Arch container by the
+release workflow — so adopting `slappyshot-bin` on the AUR is a push of two
+files that CI has already tested, with no need to regenerate anything. The
+template they come from is in [`packaging/aur/`](packaging/aur/).
 
 ### Debian, Ubuntu and derivatives
 
