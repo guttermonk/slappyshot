@@ -92,7 +92,15 @@ assets = [
 # Written as sonames rather than package names because those differ across the
 # rpm distributions (mesa-libEGL on Fedora, libEGL1 on openSUSE) while the
 # library filename does not.
+#
+# The last one is a rich dependency, rpm's spelling of the deb's
+# `libwayland-client0 | libx11-6`: the program needs one display protocol or
+# the other and not both, and a plain Requires cannot say so. Rich deps want
+# rpm 4.13, which is Fedora 24, RHEL 8 and Leap 15 -- older than anything this
+# can run on for glibc reasons anyway. Verified to come out as a real rich
+# dependency rather than a literal name; see the assertion in release.yml.
 [package.metadata.generate-rpm.requires]
 "libEGL.so.1()(64bit)" = "*"
 "libGL.so.1()(64bit)" = "*"
 "libxkbcommon.so.0()(64bit)" = "*"
+"(libwayland-client.so.0()(64bit) or libX11.so.6()(64bit))" = "*"

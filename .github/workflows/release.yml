@@ -100,6 +100,28 @@ jobs:
           cp -r README.md LICENSE assets slappyshot.desktop -t "$stage"
           tar -zcf "target/dist/${NAME}.tar.gz" -C "$stage" .
 
+      # Rendered rather than committed whole, because half of it is the
+      # checksum of a tarball that did not exist until the step above ran. The
+      # template is packaging/aur/PKGBUILD.in; see its header for what is still
+      # a manual step (.SRCINFO, which needs makepkg).
+      - name: Arch PKGBUILD
+        env:
+          NAME: ${{ steps.version.outputs.name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          sha="$(sha256sum "target/dist/${NAME}.tar.gz" | cut -d' ' -f1)"
+          sed -e "s|@PKGVER@|${VERSION}|g" -e "s|@SHA256@|${sha}|g" \
+            packaging/aur/PKGBUILD.in > target/dist/PKGBUILD
+          # A token that survived means either a renamed placeholder or a sed
+          # that silently matched nothing, and the package would then fetch
+          # from a URL with the word PKGVER in it, or check against a checksum
+          # that is not one. Neither fails until somebody tries to install it.
+          if grep -q '@[A-Z0-9_]*@' target/dist/PKGBUILD; then
+            echo "::error::PKGBUILD still contains an unsubstituted token"
+            exit 1
+          fi
+          cat target/dist/PKGBUILD
+
       - name: Debian package
         env:
           NAME: ${{ steps.version.outputs.name }}
@@ -154,9 +176,14 @@ jobs:
           chmod +x appimagetool
           ./appimagetool "$appdir" "target/dist/slappyshot-${VERSION}-${ARCH}.AppImage"
 
+      # rpm is not promised by the runner image, and the step below asserts
+      # against it rather than skipping when it is absent.
+      - name: Install rpm
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm
+
       # Cheap, and the failure it catches is the expensive one: a package that
-      # installs and then cannot start. The grep asserts the hand-written
-      # dependencies from Cargo.toml actually made it into the control file,
+      # installs and then cannot start. The greps assert the hand-written
+      # dependencies from Cargo.toml actually made it into both packages,
       # because the automatic discovery would have found only libc.
       - name: Inspect the packages
         run: |
@@ -167,14 +194,26 @@ jobs:
           # goes missing the package still builds -- and then fails to start
           # on a machine without a GL stack. Unguarded on purpose.
           dpkg-deb --field target/dist/*.deb Depends | grep -q libegl1
-          # These two are only for the log, and neither tool is promised by the
-          # runner image, so their absence must not fail the release.
+
+          # The rpm's turn. Installed above rather than guarded with `command
+          # -v`, which is what this used to do: a check that quietly does not
+          # run is not a check, and the rich dependency below is the subtlest
+          # thing either package carries.
+          rpm -qpi target/dist/*.rpm
+          rpm -qpR target/dist/*.rpm
+          rpm -qpR target/dist/*.rpm | grep -q 'libEGL.so.1'
+          # Rich dependencies are a name beginning with "(" plus a flag, and a
+          # tool that wrote the name without the flag would produce a package
+          # demanding a literal dependency called "(libwayland-client.so.0...)"
+          # -- satisfiable nowhere, and uninstallable on every distribution
+          # rather than merely under-specified. rpm prints the rpmlib feature
+          # only when the flag is really set, so that is what is asserted.
+          rpm -qpR target/dist/*.rpm | grep -q 'rpmlib(RichDependencies)'
+          rpm -qpR target/dist/*.rpm | grep -q '^(libwayland-client.so.0.* or libX11.so.6'
+
+          # Only for the log, and not promised by the runner image.
           if command -v desktop-file-validate >/dev/null; then
             desktop-file-validate slappyshot.desktop
-          fi
-          if command -v rpm >/dev/null; then
-            rpm -qpi target/dist/*.rpm
-            rpm -qpR target/dist/*.rpm
           fi
           ls -l target/dist
 
@@ -197,6 +236,7 @@ jobs:
             target/dist/*.deb
             target/dist/*.rpm
             target/dist/*.AppImage
+            target/dist/PKGBUILD
             target/dist/SHA256SUMS
 
       - name: Upload packages (dispatch runs)

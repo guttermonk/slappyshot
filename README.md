@@ -4,6 +4,69 @@ A fast, toolkit-independent screenshot annotation tool. Pipe in a screenshot, an
 
 "You miss 100% of the screenshots you don't take using slappyshot." - Wayne Gretzky
 
+## Installation
+
+Packages are attached to each [release][releases], with a `SHA256SUMS` to check
+them against. All of them are x86_64.
+
+### Arch Linux
+
+```sh
+curl -fsSLO https://github.com/guttermonk/slappyshot/releases/latest/download/PKGBUILD
+makepkg -si
+```
+
+That builds `slappyshot-bin` from the release tarball. The template it is
+rendered from is in [`packaging/aur/`](packaging/aur/).
+
+### Debian, Ubuntu and derivatives
+
+```sh
+sudo apt install ./slappyshot-<version>-x86_64-unknown-linux-gnu.deb
+```
+
+Needs glibc 2.35, so Debian 12 or Ubuntu 22.04 and newer. `grim` and `slurp`
+are recommended rather than depended on: slappyshot annotates an image handed
+to it and captures nothing itself.
+
+### Fedora and openSUSE
+
+```sh
+sudo dnf install ./slappyshot-<version>-x86_64-unknown-linux-gnu.rpm
+```
+
+Same glibc floor, which RHEL 9 and its rebuilds do not meet — they are on 2.34.
+Use the AppImage or build from source there.
+
+### AppImage
+
+```sh
+chmod +x slappyshot-<version>-x86_64.AppImage
+grim - | ./slappyshot-<version>-x86_64.AppImage -f -
+```
+
+Nothing is bundled inside it. Every library slappyshot uses is dlopened and has
+to come from the host regardless, and shipping a GL stack in an AppImage is how
+they break on other people's drivers.
+
+### Nix
+
+```sh
+nix run github:guttermonk/slappyshot -- --help
+```
+
+Or add the flake as an input and install `packages.<system>.default`.
+
+### From source
+
+See [Build from Source](#build-from-source).
+
+There is no Flatpak, deliberately: slappyshot is normally handed its capture on
+a pipe, and a sandbox between the host's grabber and the program is the one
+thing it cannot have.
+
+[releases]: https://github.com/guttermonk/slappyshot/releases
+
 ## Usage
 
 ```sh
