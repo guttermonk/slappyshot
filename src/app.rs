@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crate::config::{Action, Config, apply_theme};
 use crate::render::{compute_blur_pixels, copy_to_clipboard, render_to_image};
+use crate::screen::Screen;
 use crate::style::{Color, Size, Style};
 use crate::tools::{
     ActiveDrawing, Annotation, CropRect, CropState, HighlightAnnotation, HighlighterKind, Smoother,
@@ -11,8 +12,8 @@ use crate::tools::{
 };
 
 /// Window geometry, in logical points -- the unit egui and eframe size
-/// windows in. Shared with main.rs so its provisional ViewportBuilder size and
-/// the corrected one in App::apply_initial_window_size cannot drift apart.
+/// windows in. Shared with main.rs so the size it builds the window at and the
+/// one App::apply_initial_window_size would correct it to cannot drift apart.
 ///
 /// Vertical room for the toolbar strip above the canvas, so a window sized to
 /// the image does not then cover part of it.
@@ -47,20 +48,22 @@ const INITIAL_SIZE_MAX_ATTEMPTS: u32 = 60;
 /// reports one.
 const INITIAL_SIZE_SCALE_GRACE: u32 = 20;
 
-/// How much of the monitor a window may take before it is in the way.
+/// How much of the monitor a window may take before it is in the way, when
+/// the usable area could not be had any other way.
 ///
 /// A window clamped to the monitor exactly is still too big, because a panel
-/// takes a bite out of the screen that the window knows nothing about: Wayland
-/// hands a client the MONITOR size and never the work area. A full-screen
-/// capture therefore opened a full-screen-tall window, which the compositor
-/// centred in the usable area, leaving the toolbars tucked under the bar --
-/// toolbars being at the top, that is the half that hurts.
+/// takes a bite out of the screen that the window knows nothing about: the
+/// toplevel protocol hands a client the MONITOR size and never the work area.
+/// A full-screen capture therefore opened a full-screen-tall window, which the
+/// compositor centred in the usable area, leaving the toolbars tucked under
+/// the bar -- toolbars being at the top, that is the half that hurts.
 ///
 /// This is a heuristic and not a measurement, which is the honest way to say
-/// it. 5% is 43 points of the 864 on this display, comfortably clear of the
-/// 30-point bar measured here, and small enough to be invisible on a screen
-/// with no panel at all. The compositor remains the only thing that knows the
-/// real answer; if one ever offers it, this should go.
+/// it, and a heuristic tuned on one machine is a machine-shaped fix: 5% is 43
+/// points of the 864 on the display it was measured on and 48 of the 960 on
+/// the next one, which clears a 30-point bar and a 38-point bar by luck as
+/// much as by design. screen::probe is the measurement, and where it answers
+/// -- any compositor with the layer shell -- this is not consulted at all.
 const MAX_MONITOR_FRACTION: f32 = 0.95;
 
 /// Breathing room beside the toolbar buttons when they set the window's
@@ -145,10 +148,15 @@ pub struct App {
     pointer_drag: PointerDrag,
     key_flash: Option<(ToolType, Instant)>,
     show_info: bool,
+    /// What the compositor said about the screen before the window was built,
+    /// if it was asked and answered. Set means main.rs already sized the
+    /// window from a measurement, which is the only moment the size can be
+    /// set at all -- see apply_initial_window_size.
+    screen: Option<Screen>,
 }
 
 impl App {
-    pub fn new(source_image: RgbaImage, config: Config) -> Self {
+    pub fn new(source_image: RgbaImage, config: Config, screen: Option<Screen>) -> Self {
         let style = Style {
             color: {
                 let palette = config.palette_colors();
@@ -205,6 +213,7 @@ impl App {
             pointer_drag: PointerDrag::None,
             key_flash: None,
             show_info: false,
+            screen,
         }
     }
 
@@ -345,51 +354,39 @@ impl App {
         ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min));
     }
 
-    /// Size the window to the image, once, on the first frame that knows the
-    /// display scale.
+    /// Correct the window's size from the frame that first knows the display
+    /// scale -- for the compositors that could not be asked beforehand.
     ///
-    /// main.rs asks for a size in ViewportBuilder and cannot get it right:
-    /// `inner_size` is in logical POINTS, the image is in PIXELS, and the
-    /// ratio between them is the display's scale factor, which no monitor has
-    /// reported yet at that point in startup. On a scale 1.0 display the two
-    /// numbers happen to coincide and the mistake is invisible, which is why
-    /// this went unnoticed; at 1.25 the window opens 25% oversized in each
-    /// dimension. That value is only available from the context, so the real
-    /// sizing has to happen here and main.rs's call is a provisional guess.
+    /// This runs only when screen::probe came back empty, because a window
+    /// whose size was measured before it was built has nothing to correct:
+    /// main.rs had the scale and the usable area and used both. Where the
+    /// probe does fail -- GNOME, X11, no layer shell -- main.rs falls back to
+    /// treating the image's PIXELS as POINTS, which is right only at scale
+    /// 1.0, and this is where that gets found out and fixed.
     ///
-    /// Clamped to the monitor, because the floor in main.rs (400x300) has
-    /// never had a matching ceiling: a full-screen capture asks for a window
-    /// larger than the screen it was taken from, at ANY scale. The image is
-    /// not shrunk to fit -- zoom stays 1:1 and the existing pan (drag, or the
-    /// arrow keys with the pointer tool) reaches the rest of it.
+    /// Clamped to the monitor, because the floor in main.rs has never had a
+    /// matching ceiling: a full-screen capture asks for a window larger than
+    /// the screen it was taken from, at ANY scale. The image is not shrunk to
+    /// fit -- zoom stays 1:1 and the existing pan (drag, or the arrow keys
+    /// with the pointer tool) reaches the rest of it.
     ///
     /// Clamped to MAX_MONITOR_FRACTION of the monitor rather than to the
-    /// monitor itself. Clamping to the whole thing was tried first, on the
-    /// argument that only the compositor knows where the panels are and it is
-    /// the one placing the window -- and that turned out to be half an
-    /// argument. Hyprland does centre the window in the USABLE area, which it
-    /// can only do if the window fits: a full-screen capture gives a
-    /// full-screen-tall window, 30 points of overflow, and half of that lands
-    /// on the toolbars at the top. See the constant for why a fraction is the
-    /// honest shape of the fix.
+    /// monitor itself, because the monitor is not the usable area and this
+    /// path has no way to learn the difference. See the constant.
     ///
     /// Asked for repeatedly, and that is the part that took a measurement to
     /// learn. A single request sent on the first frame is simply lost: the
     /// Wayland surface has not been configured yet, so there is nothing to
-    /// resize, and the window keeps main.rs's provisional size. Measured on
-    /// Hyprland at scale 1.25 -- a 200x150 capture opened 800x760, which is
-    /// the OLD formula exactly, with the correction compiled in and running.
-    /// The existing toolbar min-width command appears to work only because it
-    /// fires later, once the toolbars have been laid out at least once.
-    ///
-    /// So it re-asks until screen_rect comes back the size it asked for, and
-    /// gives up after INITIAL_SIZE_MAX_ATTEMPTS. Both halves matter: without
-    /// the retry the request never lands, and without the cap a compositor
-    /// that declines the size -- tiled, maximised, snapped -- would be fought
-    /// every frame for as long as the window is open, including after the
-    /// user has resized it by hand.
+    /// resize. So it re-asks until the window is within its bounds, and gives
+    /// up after INITIAL_SIZE_MAX_ATTEMPTS. Both halves matter: without the
+    /// retry the request never lands, and without the cap a compositor that
+    /// declines the size -- tiled, maximised, snapped, or simply Hyprland --
+    /// would be fought every frame for as long as the window is open,
+    /// including after the user has resized it by hand.
     fn apply_initial_window_size(&mut self, ctx: &egui::Context) {
-        if self.initial_size_attempts >= INITIAL_SIZE_MAX_ATTEMPTS || self.config.general.fullscreen
+        if self.initial_size_attempts >= INITIAL_SIZE_MAX_ATTEMPTS
+            || self.config.general.fullscreen
+            || self.screen.is_some()
         {
             return;
         }
@@ -440,22 +437,41 @@ impl App {
             size.max(egui::vec2(MIN_WINDOW_W_POINTS, MIN_WINDOW_H_POINTS))
         });
 
-        // Done when the window is at least the wanted size, NOT when it equals
-        // it. The mechanism is a floor, so "big enough" is the whole of what it
-        // can achieve, and a window can legitimately be wider than asked --
-        // the toolbars have a minimum width of their own and it is routinely
-        // larger than a small capture.
+        // Done when the window is big enough AND not too big, which are two
+        // different questions with two different answers.
         //
-        // Testing for equality instead left every small capture spinning out
-        // all 60 attempts against a width it was never going to get, and then
-        // holding the floor below for the life of the window, which turned
-        // into a resize fight with the compositor whenever the window was
-        // dragged.
+        // Big enough is measured against `want` and not for equality with it.
+        // The mechanism is a floor, so "at least" is the whole of what it can
+        // achieve, and a window may legitimately be WIDER than asked -- the
+        // toolbars have a minimum width of their own and it is routinely
+        // larger than a small capture. Testing for equality instead left every
+        // small capture spinning out all 60 attempts against a width it was
+        // never going to get, and then holding the floor below for the life of
+        // the window, which turned into a resize fight with the compositor
+        // whenever the window was dragged.
         //
-        // The 1.0 of slack is for a compositor's rounding, not for the window
-        // being a bit small: a point under is still under.
+        // Not too big is measured against the monitor clamp, and leaving it
+        // out was the bug that broke a second laptop: a full-screen capture
+        // opens at the monitor's own size, which is already past `want`, so
+        // "big enough" read as satisfied on the first frame and the window
+        // kept every point of the bar's area it was sitting under.
+        //
+        // The 1.0 of slack on each is for a compositor's rounding, not for the
+        // window being a bit off: a point under is still under.
         let have = ctx.input(|i| i.viewport_rect()).size();
-        if have.x + 1.0 >= want.x && have.y + 1.0 >= want.y {
+        // Floored at the window minimum, so the ceiling and the floor cannot
+        // contradict each other on a screen too small to hold the toolbars.
+        let ceiling = monitor
+            .map(|monitor| {
+                (monitor * MAX_MONITOR_FRACTION)
+                    .max(egui::vec2(MIN_WINDOW_W_POINTS, MIN_WINDOW_H_POINTS))
+            })
+            .unwrap_or(egui::Vec2::INFINITY);
+        if have.x + 1.0 >= want.x
+            && have.y + 1.0 >= want.y
+            && have.x <= ceiling.x + 1.0
+            && have.y <= ceiling.y + 1.0
+        {
             self.initial_size_attempts = INITIAL_SIZE_MAX_ATTEMPTS;
             // Let go of the floor now that the size has landed, so the window
             // can still be made smaller by hand afterwards.

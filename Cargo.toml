@@ -26,6 +26,13 @@ imageproc = "0.27"
 arboard   = "3"
 notify-rust = "4"
 notosans  = "0.1"
+# Asking the compositor how big the screen really is, before the window is
+# built -- see src/screen.rs. Both of these are already in the tree underneath
+# eframe (winit speaks Wayland through them), so naming them here adds code to
+# write and none to compile. default-features off leaves out calloop and
+# xkbcommon, which are an event loop and a keyboard this has no use for.
+smithay-client-toolkit = { version = "0.19", default-features = false }
+wayland-client = "0.31"
 
 [build-dependencies]
 clap          = { version = "4", features = ["derive"] }

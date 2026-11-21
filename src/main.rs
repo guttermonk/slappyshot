@@ -2,6 +2,7 @@ mod app;
 mod cli;
 mod config;
 mod render;
+mod screen;
 mod style;
 mod tools;
 
@@ -79,41 +80,55 @@ fn main() -> anyhow::Result<()> {
 
     let icon = load_icon();
 
-    // THE size, not a provisional one. What is asked for here is very nearly
-    // what the window will be for the rest of its life, because nothing
-    // afterwards can change it:
+    // THE size, and the only chance to get it right. Nothing afterwards can
+    // change it -- measured on Hyprland 0.55.4, sixty frames of each with the
+    // window never moving a point:
     //
-    //   ViewportCommand::InnerSize     ignored (measured: 60 sends, no movement)
+    //   ViewportCommand::InnerSize     ignored
     //   ViewportCommand::MaxInnerSize  ignored
-    //   ViewportCommand::MinInnerSize  honoured, and the only one that is
+    //   ViewportCommand::MinInnerSize  ignored below the current size
     //
-    // And a floor imposed later that disagrees with this number is not merely
-    // ineffective, it is visible: the compositor keeps proposing the size the
-    // window was created at, the floor pushes back, and the two alternate on
-    // every reconfigure -- a flicker under the cursor for as long as the
-    // window is being dragged.
+    // So the two facts the size depends on have to be in hand BEFORE the
+    // window exists, and neither is available from it: the display's scale,
+    // which converts the image's PIXELS into the POINTS inner_size is
+    // measured in, and the usable area, which is the screen minus whatever a
+    // bar has reserved along an edge. screen::probe asks the compositor for
+    // both. See that module for how, and for why the obvious route -- the
+    // bounds xdg_toplevel is supposed to suggest -- is not available.
     //
-    // So this asks for the image's own dimensions and App corrects nothing
-    // downward. That is knowingly a little large on a fractional-scale
-    // display: these are PIXELS where inner_size wants POINTS, so the window
-    // comes out scale-factor bigger than the image strictly needs. It is the
-    // lesser fault by a distance -- exactly right at scale 1.0, and the
-    // alternative was correct-but-flickering.
-    //
-    // eframe clamps this to the monitor's point size before the window is
-    // built (epi_integration.rs, clamp_size_to_monitor_size) using winit's
-    // real scale factor, so a capture bigger than the screen does not ask for
-    // a window bigger than the screen.
+    // Without an answer, the fallback is the old behaviour: pixels used as
+    // points, which is exactly right at scale 1.0 and scale-factor too large
+    // everywhere else, clamped by eframe to the monitor's point size
+    // (epi_integration.rs, clamp_size_to_monitor_size) and by App to a
+    // fraction of it. A window that is somewhat too large is a far smaller
+    // fault than a window that is not there yet, and the probe is the thing
+    // that can fail.
     //
     // MIN_WINDOW_W_POINTS is wide enough to clear the toolbars' own measured
     // minimum, so the floor they impose later never disagrees with this.
+    let screen = screen::probe();
+    let scale = screen.as_ref().and_then(|s| s.scale).unwrap_or(1.0);
+
+    let mut size = egui::vec2(
+        (img_w / scale).max(app::MIN_WINDOW_W_POINTS),
+        (img_h / scale).max(app::MIN_WINDOW_H_POINTS) + app::TOOLBAR_RESERVE_POINTS,
+    );
+    if let Some(screen) = &screen {
+        // Clamped to the usable area and not to the screen, because the
+        // difference between the two is precisely a window with its toolbars
+        // tucked under the bar. The floors below win over this on a screen too
+        // small to hold the toolbars at all; there is nothing better to do
+        // with that case than overflow it.
+        size = size.min(screen.work_area).max(egui::vec2(
+            app::MIN_WINDOW_W_POINTS,
+            app::MIN_WINDOW_H_POINTS,
+        ));
+    }
+
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("slappyshot")
         .with_app_id("slappyshot")
-        .with_inner_size([
-            img_w.max(app::MIN_WINDOW_W_POINTS),
-            img_h.max(app::MIN_WINDOW_H_POINTS) + app::TOOLBAR_RESERVE_POINTS,
-        ])
+        .with_inner_size(size)
         .with_min_inner_size([app::MIN_WINDOW_W_POINTS, app::MIN_WINDOW_H_POINTS])
         .with_fullscreen(config.general.fullscreen)
         .with_decorations(!config.general.no_window_decoration);
@@ -140,7 +155,10 @@ fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let app = App::new(image, config);
+    // Handed on so App knows whether the size above was measured or guessed.
+    // Its own sizing pass is the correction for a guess and has nothing to add
+    // to a measurement.
+    let app = App::new(image, config, screen);
 
     eframe::run_native(
         "slappyshot",
