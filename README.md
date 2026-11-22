@@ -10,7 +10,11 @@ A fast, toolkit-independent screenshot annotation tool. Pipe in a screenshot, an
 ## Installation
 
 Packages are attached to each [release][releases], with a `SHA256SUMS` to check
-them against. All of them are x86_64.
+them against. Each comes in x86_64 and aarch64, both built natively and both
+needing glibc 2.35 — Debian 12, Ubuntu 22.04, Fedora, or newer. RHEL 9 and its
+rebuilds are on 2.34 and do not meet it.
+
+The exception is the Arch package, which is x86_64 only; see below.
 
 ### Arch Linux
 
@@ -43,27 +47,26 @@ two are rendered from is in [`packaging/aur/`](packaging/aur/).
 ### Debian, Ubuntu and derivatives
 
 ```sh
-sudo apt install ./slappyshot-<version>-x86_64-unknown-linux-gnu.deb
+sudo apt install ./slappyshot-<version>-<arch>-unknown-linux-gnu.deb
 ```
 
-Needs glibc 2.35, so Debian 12 or Ubuntu 22.04 and newer. `grim` and `slurp`
-are recommended rather than depended on: slappyshot annotates an image handed
-to it and captures nothing itself.
+`grim` and `slurp` are recommended rather than depended on: slappyshot
+annotates an image handed to it and captures nothing itself.
 
 ### Fedora and openSUSE
 
 ```sh
-sudo dnf install ./slappyshot-<version>-x86_64-unknown-linux-gnu.rpm
+sudo dnf install ./slappyshot-<version>-<arch>-unknown-linux-gnu.rpm
 ```
 
-Same glibc floor, which RHEL 9 and its rebuilds do not meet — they are on 2.34.
-Use the AppImage or build from source there.
+RHEL 9 and its rebuilds do not meet the glibc floor; use the AppImage or build
+from source there.
 
 ### AppImage
 
 ```sh
-chmod +x slappyshot-<version>-x86_64.AppImage
-grim - | ./slappyshot-<version>-x86_64.AppImage -f -
+chmod +x slappyshot-<version>-<arch>.AppImage
+grim - | ./slappyshot-<version>-<arch>.AppImage -f -
 ```
 
 Nothing is bundled inside it. Every library slappyshot uses is dlopened and has

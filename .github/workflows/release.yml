@@ -13,29 +13,47 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Used for naming only. The build is native -- see the build step.
-  TARGET: x86_64-unknown-linux-gnu
 
 permissions:
   contents: read
 
 jobs:
-  release:
-    # Deliberately not ubuntu-latest. Nothing but libc, libm and libgcc_s is
-    # linked -- wayland-sys is built with its dlopen feature, and X11 and
-    # xkbcommon arrive through x11-dl and xkbcommon-dl, which dlopen too -- so
-    # the glibc of the build machine is the only thing deciding where these
-    # packages can run. ubuntu-latest is 24.04 and glibc 2.39, which would
-    # leave out Debian 12 (2.36) and Ubuntu 22.04 itself (2.35) for no gain.
-    runs-on: ubuntu-22.04
+  build:
+    strategy:
+      # Independent architectures. One failing is a reason to look at the
+      # other's log, not to lose it.
+      fail-fast: false
+      matrix:
+        include:
+          # Deliberately not ubuntu-latest. Nothing but libc, libm and libgcc_s
+          # is linked -- wayland-sys is built with its dlopen feature, and X11
+          # and xkbcommon arrive through x11-dl and xkbcommon-dl, which dlopen
+          # too -- so the glibc of the build machine is the only thing deciding
+          # where these packages can run. ubuntu-latest is 24.04 and glibc
+          # 2.39, which would leave out Debian 12 (2.36) and Ubuntu 22.04
+          # itself (2.35) for no gain.
+          - runner: ubuntu-22.04
+            arch: x86_64
+            target: x86_64-unknown-linux-gnu
+          # Native, on GitHub's arm64 runners, which are free to public
+          # repositories. Cross-compiling was the alternative and a worse one:
+          # cargo-deb and cargo-generate-rpm would both need telling where the
+          # binary went, the AppImage would need a foreign runtime, and none of
+          # it would have executed before being handed to somebody. 22.04 here
+          # too, so both architectures carry the same glibc floor rather than
+          # two stories to tell in the README.
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
+            target: aarch64-unknown-linux-gnu
 
-    permissions:
-      contents: write
+    runs-on: ${{ matrix.runner }}
 
-    # Read by the arch job below, which cannot see this one's step outputs.
+    # Read by the jobs below, which cannot see this one's step outputs. Only
+    # the version: it is the one value both legs agree on, so a matrix job's
+    # last-writer-wins output is harmless for it. Anything per-architecture
+    # would not be, and is rebuilt from version and arch where it is wanted.
     outputs:
       version: ${{ steps.version.outputs.version }}
-      name: ${{ steps.version.outputs.name }}
 
     steps:
       # No system libraries to install, for the dlopen reasons above: nothing
@@ -57,6 +75,8 @@ jobs:
 
       - name: Resolve the version
         id: version
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           cargo_version="$(cargo metadata --no-deps --format-version 1 \
             | jq -r '.packages[0].version')"
@@ -74,10 +94,12 @@ jobs:
           echo "version=${cargo_version}" >> "$GITHUB_OUTPUT"
           echo "name=slappyshot-${cargo_version}-${TARGET}" >> "$GITHUB_OUTPUT"
 
-      # Native, so the binary lands at the plain target/release/slappyshot that
-      # the asset paths in Cargo.toml name. Building --target x86_64-unknown-
-      # linux-gnu instead would put it under target/<triple>/release and leave
-      # both packagers looking in the wrong place.
+      # Native on both runners, so the binary lands at the plain
+      # target/release/slappyshot that the asset paths in Cargo.toml name.
+      # Passing --target <triple> instead would put it under
+      # target/<triple>/release and leave both packagers looking in the wrong
+      # place -- which is also why the matrix picks a runner per architecture
+      # rather than a target per architecture.
       - name: Build
         run: cargo build --release --locked
 
@@ -130,7 +152,14 @@ jobs:
       # checksum of a tarball that did not exist until the step above ran. The
       # template is packaging/aur/PKGBUILD.in; see its header for what is still
       # a manual step (.SRCINFO, which needs makepkg).
+      #
+      # x86_64 only, the PKGBUILD saying arch=('x86_64') and naming one source.
+      # Making it dual-architecture is a real change -- source_x86_64 and
+      # source_aarch64 with a checksum each, which this job cannot render
+      # because it only ever holds one of the two tarballs -- and it is not
+      # this one. Arch ARM users build from source until then.
       - name: Arch PKGBUILD
+        if: matrix.arch == 'x86_64'
         env:
           NAME: ${{ steps.version.outputs.name }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -161,7 +190,7 @@ jobs:
       - name: AppImage
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          ARCH: x86_64
+          ARCH: ${{ matrix.arch }}
           # The runners have no FUSE, so appimagetool cannot mount itself.
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: |
@@ -197,8 +226,11 @@ jobs:
             'exec "$HERE/usr/bin/slappyshot" "$@"' > "$appdir/AppRun"
           chmod +x "$appdir/AppRun"
 
+          # appimagetool per architecture, and it has to be the native one:
+          # this runner cannot execute a foreign binary any more than the
+          # program it is packaging could.
           curl -fsSLo appimagetool \
-            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${ARCH}.AppImage"
           chmod +x appimagetool
           ./appimagetool "$appdir" "target/dist/slappyshot-${VERSION}-${ARCH}.AppImage"
 
@@ -243,36 +275,19 @@ jobs:
           fi
           ls -l target/dist
 
-      - name: Checksums
-        run: |
-          cd target/dist
-          sha256sum ./*.tar.gz ./*.deb ./*.rpm ./*.AppImage > SHA256SUMS
-          cat SHA256SUMS
-
-      # Draft, so there is a chance to look at the artifacts and write the
-      # notes before any of it is public. Publishing stays a manual step.
-      - name: Release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v3
+      # Named globs rather than target/dist/*, which would also sweep up the
+      # staged man/ directory -- harmless in one artifact, a collision once
+      # publish merges both architectures' into one directory.
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
         with:
-          draft: true
-          generate_release_notes: true
-          files: |
+          name: slappyshot-packages-${{ matrix.arch }}
+          path: |
             target/dist/*.tar.gz
             target/dist/*.deb
             target/dist/*.rpm
             target/dist/*.AppImage
             target/dist/PKGBUILD
-            target/dist/SHA256SUMS
-
-      # Unconditional, where this used to be dispatch-only: the arch job below
-      # needs the tarball and the PKGBUILD on a tag run too, and an artifact is
-      # the only way to hand files to a job in a different container.
-      - name: Upload packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: slappyshot-packages
-          path: target/dist/*
           if-no-files-found: error
 
   # The PKGBUILD had never been near makepkg -- it was reasoned about, and its
@@ -280,12 +295,14 @@ jobs:
   # job is the proof, and it is also the only place .SRCINFO can come from: the
   # AUR will not accept a push without one, and only makepkg writes it.
   arch:
-    needs: release
+    needs: build
     runs-on: ubuntu-latest
     container: archlinux:base-devel
 
+    # Read is enough now. This job hands its files to publish rather than to
+    # the release.
     permissions:
-      contents: write
+      contents: read
 
     steps:
       # The three runtime libraries are installed because makepkg checks
@@ -293,19 +310,25 @@ jobs:
       # already carries fakeroot, binutils and the rest of what it needs.
       - name: Tools
         run: |
-          pacman -Syu --noconfirm --needed namcap github-cli \
+          pacman -Syu --noconfirm --needed namcap \
             libglvnd libxkbcommon wayland
 
+      # x86_64's, specifically. The PKGBUILD is x86_64-only and so is the
+      # tarball its checksum is of, and this container is x86_64 besides.
       - uses: actions/download-artifact@v4
         with:
-          name: slappyshot-packages
+          name: slappyshot-packages-x86_64
           path: dist
 
       - name: Build the package
         env:
-          VERSION: ${{ needs.release.outputs.version }}
-          NAME: ${{ needs.release.outputs.name }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
+          # Rebuilt here rather than carried over from the build job: a matrix
+          # job's outputs are whichever leg wrote last, so a per-architecture
+          # name read from there would be the aarch64 one half the time.
+          NAME="slappyshot-${VERSION}-x86_64-unknown-linux-gnu"
+
           mkdir -p build
           cp dist/PKGBUILD build/
 
@@ -328,7 +351,7 @@ jobs:
 
       - name: Inspect the package
         env:
-          VERSION: ${{ needs.release.outputs.version }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
           # Named and not globbed. The glob this used to be matched two files
           # the first time it ran -- makepkg.conf carries `debug` in OPTIONS
@@ -370,7 +393,7 @@ jobs:
       # root -- so this extracts into one and is ready to commit.
       - name: Pack the AUR files
         env:
-          VERSION: ${{ needs.release.outputs.version }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
           aur="build/slappyshot-bin-${VERSION}-aur.tar.gz"
           tar -czf "$aur" -C build PKGBUILD .SRCINFO
@@ -383,16 +406,11 @@ jobs:
           tar -tzf "$aur" | grep -qxF '.SRCINFO'
           tar -tzf "$aur"
 
-      - name: Attach the AUR files to the release
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.release.outputs.version }}
-        run: |
-          gh release upload "$GITHUB_REF_NAME" \
-            "build/slappyshot-bin-${VERSION}-aur.tar.gz" \
-            --clobber --repo "$GITHUB_REPOSITORY"
-
+      # Uploaded as an artifact and attached to the release by publish, which
+      # runs after this job. It used to push straight to the release from here,
+      # which worked only while the release already existed by then -- it is
+      # created last now, so a `gh release upload` at this point would be
+      # uploading to a release that is not there.
       - uses: actions/upload-artifact@v4
         with:
           name: slappyshot-aur
@@ -408,4 +426,89 @@ jobs:
           # the loose pair stays so a dispatch run can be looked at without
           # unpacking anything.
           include-hidden-files: true
+          if-no-files-found: error
+
+  # Everything that touches the release, in one job that runs after everything
+  # that makes something. Two reasons it is not folded back into the builds:
+  # two matrix legs both calling action-gh-release would race to create the
+  # same draft, and SHA256SUMS has to cover both architectures, which neither
+  # leg can see from inside itself.
+  publish:
+    needs: [build, arch]
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      # merge-multiple, so both architectures and the AUR files land in one
+      # directory. Their names carry the architecture already, which is what
+      # makes that safe -- and why the build job uploads named globs rather
+      # than its whole dist directory, the staged man/ being the one path both
+      # legs would have written to.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: slappyshot-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          # Every release asset and nothing else. *.tar.gz covers both
+          # architectures' tarballs and the AUR archive, all three of which go
+          # out; PKGBUILD is named because it has no extension to glob on. The
+          # loose .SRCINFO is left out and is meant to be -- it is a dotfile,
+          # so ./* does not reach it anyway, and it is not released on its own
+          # (it travels inside the AUR archive, GitHub having no room for an
+          # asset whose name starts with a dot). A checksums file listing
+          # something nobody can download is a puzzle, not a check.
+          sha256sum ./*.tar.gz ./*.deb ./*.rpm ./*.AppImage ./PKGBUILD > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Inspect what is about to be released
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          ls -l dist
+          # Both architectures, or this is a half release that looks like a
+          # whole one. A leg that fails outright never gets here -- `needs`
+          # wants every one of them -- so what this actually catches is a leg
+          # that succeeded while producing a file under a name nobody expected:
+          # a matrix entry edited to a different triple, an appimagetool that
+          # named its output after the host rather than the argument. Each of
+          # those passes every check inside the build and goes out missing an
+          # architecture.
+          for a in x86_64 aarch64; do
+            test -f "dist/slappyshot-${VERSION}-${a}.AppImage"
+          done
+          test -f "dist/slappyshot-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          test -f "dist/slappyshot-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
+          test -f "dist/slappyshot-bin-${VERSION}-aur.tar.gz"
+          test -f dist/PKGBUILD
+
+      # Draft, so there is a chance to look at the artifacts and write the
+      # notes before any of it is public. Publishing stays a manual step.
+      - name: Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+            dist/PKGBUILD
+            dist/SHA256SUMS
+
+      # The dispatch equivalent of the above: one artifact holding exactly what
+      # a tag would have released, so a run can be checked over without one.
+      - name: Upload the release set
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: slappyshot-release-set
+          path: dist/*
           if-no-files-found: error
