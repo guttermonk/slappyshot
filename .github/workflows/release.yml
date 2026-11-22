@@ -322,7 +322,12 @@ jobs:
           # The same assertion the deb and rpm get: a package that installs
           # and then has no program in it is the failure worth catching.
           bsdtar -tf "$pkg" | grep -qx 'usr/bin/slappyshot'
-          bsdtar -tf "$pkg" | grep -qx 'usr/share/man/man1/slappyshot.1'
+          # .gz optional, not assumed: makepkg.conf carries `zipman`, so the
+          # page arrives compressed and an exact match on the name the
+          # PKGBUILD installs fails. What is being asserted is that the page
+          # is in the package at all -- whether it is compressed on the way is
+          # makepkg's business and man reads it either way.
+          bsdtar -tf "$pkg" | grep -qE '^usr/share/man/man1/slappyshot\.1(\.gz)?$'
           cat build/.SRCINFO
 
           # For the log and not a gate. namcap reads DT_NEEDED like every
@@ -349,4 +354,10 @@ jobs:
           path: |
             build/PKGBUILD
             build/.SRCINFO
+          # Since v4.4 this action drops dotfiles unless told otherwise, and
+          # .SRCINFO is the whole point of the job. Without it the upload
+          # would have succeeded with one of the two files in it, if-no-files
+          # -found having no opinion about a path that matched nothing as long
+          # as another one did.
+          include-hidden-files: true
           if-no-files-found: error
