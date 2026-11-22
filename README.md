@@ -25,11 +25,20 @@ makepkg -si
 That gives you `slappyshot-bin`, but it will not upgrade along with the rest of
 your system, which is the part only the AUR can provide.
 
-**Packagers welcome.** Every release carries that `PKGBUILD` and a matching
-`.SRCINFO`, both rendered, built and checked in an Arch container by the
-release workflow — so adopting `slappyshot-bin` on the AUR is a push of two
-files that CI has already tested, with no need to regenerate anything. The
-template they come from is in [`packaging/aur/`](packaging/aur/).
+**Packagers welcome.** Every release carries a `slappyshot-bin-<version>-aur.tar.gz`
+holding that `PKGBUILD` and a matching `.SRCINFO`, both rendered, built and
+checked in an Arch container by the release workflow. Adopting `slappyshot-bin`
+on the AUR is then:
+
+```sh
+git clone ssh://aur@aur.archlinux.org/slappyshot-bin.git
+cd slappyshot-bin
+curl -fsSL .../slappyshot-bin-<version>-aur.tar.gz | tar -xz
+git add PKGBUILD .SRCINFO && git commit && git push
+```
+
+Nothing needs regenerating and nothing needs an Arch machine. The template the
+two are rendered from is in [`packaging/aur/`](packaging/aur/).
 
 ### Debian, Ubuntu and derivatives
 

@@ -359,14 +359,38 @@ jobs:
           namcap build/PKGBUILD || true
           namcap "$pkg" || true
 
-      # Beside the PKGBUILD it belongs to, so publishing to the AUR is a
-      # download of two files rather than a build on somebody's machine.
-      - name: Attach .SRCINFO to the release
+      # One archive rather than two loose assets, because GitHub will not take
+      # an asset whose name begins with a dot. In v0.1.2 it accepted the
+      # upload and renamed it: .SRCINFO arrived as default.SRCINFO, which a
+      # packager has to notice and undo, and which looks like a stray file to
+      # anyone who does not already know what it is.
+      #
+      # Inside an archive the name survives. Flat, and in that order, because
+      # an AUR repository is a git clone with exactly these two files at its
+      # root -- so this extracts into one and is ready to commit.
+      - name: Pack the AUR files
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          aur="build/slappyshot-bin-${VERSION}-aur.tar.gz"
+          tar -czf "$aur" -C build PKGBUILD .SRCINFO
+          # -F, so the dot in .SRCINFO is a dot. Unanchored and unescaped it
+          # is a regex matching any character, which would make this pass on
+          # an archive containing xSRCINFO -- a check that cannot fail is the
+          # thing being guarded against here, the dot being the entire reason
+          # this step exists.
+          tar -tzf "$aur" | grep -qxF 'PKGBUILD'
+          tar -tzf "$aur" | grep -qxF '.SRCINFO'
+          tar -tzf "$aur"
+
+      - name: Attach the AUR files to the release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
-          gh release upload "$GITHUB_REF_NAME" build/.SRCINFO \
+          gh release upload "$GITHUB_REF_NAME" \
+            "build/slappyshot-bin-${VERSION}-aur.tar.gz" \
             --clobber --repo "$GITHUB_REPOSITORY"
 
       - uses: actions/upload-artifact@v4
@@ -375,10 +399,13 @@ jobs:
           path: |
             build/PKGBUILD
             build/.SRCINFO
+            build/slappyshot-bin-*-aur.tar.gz
           # Since v4.4 this action drops dotfiles unless told otherwise, and
           # .SRCINFO is the whole point of the job. Without it the upload
-          # would have succeeded with one of the two files in it, if-no-files
+          # would have succeeded with one of the files in it, if-no-files
           # -found having no opinion about a path that matched nothing as long
-          # as another one did.
+          # as another one did. The archive is proof against that by itself;
+          # the loose pair stays so a dispatch run can be looked at without
+          # unpacking anything.
           include-hidden-files: true
           if-no-files-found: error
