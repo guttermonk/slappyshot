@@ -61,7 +61,7 @@
     in {
       default = rustPlatform.buildRustPackage {
         pname = "slappyshot";
-        version = "0.1.1";
+        version = "0.1.2";
         src = self;
 
         cargoLock.lockFile = ./Cargo.lock;
