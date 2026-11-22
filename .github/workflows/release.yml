@@ -82,14 +82,35 @@ jobs:
         run: cargo build --release --locked
 
       - name: Stage the manpage
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           # build.rs renders the page into OUT_DIR, whose directory name
           # carries a build hash, so it has to be found rather than named --
           # the same dance flake.nix and the Makefile do. Deliberately not
           # guarded with `|| true`: every package below lists this path, and a
           # silent skip would ship them all with `man slappyshot` empty.
+          #
+          # Newest, and under release/ only, where this used to take the first
+          # thing `find target` offered. A target directory holds one OUT_DIR
+          # per version ever built in it, and the cache carries them between
+          # runs, so `head -1` was picking by filesystem order among pages for
+          # several different versions. On the machine this was written on
+          # that is fifteen pages across three versions, and head -1 chose
+          # 0.1.0. CI has happened to choose right so far, which is not the
+          # same as having been made to.
           mkdir -p target/dist/man
-          cp "$(find target -name slappyshot.1 | head -1)" target/dist/man/slappyshot.1
+          page="$(find target/release/build -name slappyshot.1 -printf '%T@ %p\n' \
+            | sort -rn | head -1 | cut -d' ' -f2-)"
+          test -n "$page"
+          cp "$page" target/dist/man/slappyshot.1
+
+          # And the assertion that makes the choosing merely an optimisation.
+          # Every package below ships this file, so a stale one would go out in
+          # all four at once, saying the wrong version to anyone who ran `man
+          # slappyshot` and to nobody else -- which is how it would survive a
+          # release or two before turning into a confusing bug report.
+          grep -q "slappyshot ${VERSION}" target/dist/man/slappyshot.1
 
       - name: Tarball
         env:
