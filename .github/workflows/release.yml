@@ -306,8 +306,18 @@ jobs:
           ls -l build
 
       - name: Inspect the package
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
-          pkg="$(ls build/*.pkg.tar.zst)"
+          # Named and not globbed. The glob this used to be matched two files
+          # the first time it ran -- makepkg.conf carries `debug` in OPTIONS
+          # and had split out a -debug package -- and handed both to bsdtar as
+          # one filename with a newline in it. The PKGBUILD now says !debug,
+          # so naming the file is also the assertion that it did: a second
+          # package, or a pkgver that failed to render, fails here rather than
+          # being whatever `ls` happened to put first.
+          pkg="build/slappyshot-bin-${VERSION}-1-x86_64.pkg.tar.zst"
+          test -f "$pkg"
           bsdtar -tf "$pkg" | sort
           # The same assertion the deb and rpm get: a package that installs
           # and then has no program in it is the failure worth catching.

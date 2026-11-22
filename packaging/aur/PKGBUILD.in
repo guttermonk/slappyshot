@@ -38,6 +38,13 @@ optdepends=(
 provides=('slappyshot')
 conflicts=('slappyshot')
 
+# Arch's makepkg.conf carries `debug` in OPTIONS, which splits the symbols of
+# everything it builds into a second -debug package. There is nothing here to
+# split: this is a release binary built elsewhere, from a cargo release profile
+# that sets debug = false, so the extra package would be an empty one shipped
+# under a name implying otherwise.
+options=('!debug')
+
 # No makedepends and no build(): this is the released binary, already built.
 source=("slappyshot-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/slappyshot-${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
 sha256sums=('@SHA256@')
