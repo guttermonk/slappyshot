@@ -140,10 +140,23 @@ fn main() -> anyhow::Result<()> {
         // tucked under the bar. The floors below win over this on a screen too
         // small to hold the toolbars at all; there is nothing better to do
         // with that case than overflow it.
-        size = size.min(screen.work_area).max(egui::vec2(
-            app::MIN_WINDOW_W_POINTS,
-            app::MIN_WINDOW_H_POINTS,
-        ));
+        //
+        // Less a margin on each edge, because the usable area is what the
+        // compositor will give a window and not what it looks like once drawn:
+        // the border goes OUTSIDE the size asked for here, so a window sized to
+        // the whole of it starts over the edge by the border's width. Measured
+        // on a 1440x922 work area, a capture bigger than it opened at exactly
+        // 1440x922 and sat flush against left, right and bottom at once, the
+        // border past all three. See config::default_window_margin for why the
+        // amount is a setting and not a number: a client cannot read the
+        // border's width from anywhere.
+        let margin = config.general.window_margin.max(0.0);
+        size = size
+            .min(screen.work_area - egui::vec2(2.0 * margin, 2.0 * margin))
+            .max(egui::vec2(
+                app::MIN_WINDOW_W_POINTS,
+                app::MIN_WINDOW_H_POINTS,
+            ));
     }
 
     let mut viewport = egui::ViewportBuilder::default()

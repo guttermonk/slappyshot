@@ -261,6 +261,11 @@ zoom_factor = 1.1
 zoom_to_fit = true
 # Pan step size in pixels (for keyboard panning)
 pan_step_size = 50.0
+# Points left free along each edge when a capture would otherwise fill the
+# usable area. Covers the window border, which the compositor draws outside the
+# size the window asks for and does not tell the client the width of — the
+# default leaves 2 points showing beside a 3 point border.
+window_margin = 5.0
 # Disable window decorations
 no_window_decoration = false
 # Actions on Enter key [save_to_clipboard, save_to_file, exit]

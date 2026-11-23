@@ -58,6 +58,8 @@ pub struct GeneralConfig {
     pub zoom_to_fit: bool,
     #[serde(default = "default_pan_step_size")]
     pub pan_step_size: f32,
+    #[serde(default = "default_window_margin")]
+    pub window_margin: f32,
     #[serde(default)]
     pub no_window_decoration: bool,
     #[serde(default)]
@@ -103,6 +105,26 @@ fn default_zoom_to_fit() -> bool {
 fn default_pan_step_size() -> f32 {
     50.0
 }
+/// Points left free along each edge when a capture is big enough that the
+/// window would otherwise fill the usable area exactly.
+///
+/// Two things come out of this and only one of them can be measured. A
+/// compositor draws a window's border OUTSIDE the size its client asked for,
+/// so a window sized to the whole usable area is already past the edge by the
+/// border's width before anything else happens -- and the width is not
+/// knowable from here. Hyprland's border_size is set per window rule, so it
+/// differs between two windows on one screen, and no protocol offers it to the
+/// client. The rest is plain breathing room, so the result does not sit flush
+/// against three sides of the screen.
+///
+/// 5 leaves 2 points showing beside a 3 point border, which is a guess at a
+/// common arrangement rather than a measurement of anybody's. Raise it if the
+/// border is thicker. The cost of having it too large is a few points of
+/// window on a capture that was being scaled down to fit regardless; the cost
+/// of too small is the flush edge this exists to prevent.
+fn default_window_margin() -> f32 {
+    5.0
+}
 /// Carry the tool, size and colour over from the last run.
 ///
 /// On by default because the alternative is reselecting the same three things
@@ -137,6 +159,7 @@ impl Default for GeneralConfig {
             zoom_factor: default_zoom_factor(),
             zoom_to_fit: default_zoom_to_fit(),
             pan_step_size: default_pan_step_size(),
+            window_margin: default_window_margin(),
             no_window_decoration: false,
             disable_notifications: false,
             remember_last_used: default_remember_last_used(),

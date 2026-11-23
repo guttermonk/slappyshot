@@ -57,6 +57,15 @@ zoom_to_fit = true
 zoom_factor = 1.1
 # How far an arrow key pans, in pixels. Panning needs the Pointer tool.
 pan_step_size = 50.0
+# Points to leave free along each edge when a capture is large enough that the
+# window would otherwise fill the whole usable area.
+#
+# This has to cover the window border as well as the gap you want to see,
+# because a compositor draws the border OUTSIDE the size the window asks for
+# and no protocol tells a client how wide it is. The default leaves 2 points
+# showing beside a 3 point border; raise it if yours is thicker, lower it to 0
+# to go back to filling the usable area exactly.
+window_margin = 5.0
 
 # --- Output
 
