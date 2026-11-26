@@ -31,7 +31,7 @@ notosans  = "0.1"
 # eframe (winit speaks Wayland through them), so naming them here adds code to
 # write and none to compile. default-features off leaves out calloop and
 # xkbcommon, which are an event loop and a keyboard this has no use for.
-smithay-client-toolkit = { version = "0.19", default-features = false }
+smithay-client-toolkit = { version = "0.21", default-features = false }
 wayland-client = "0.31"
 
 [build-dependencies]
